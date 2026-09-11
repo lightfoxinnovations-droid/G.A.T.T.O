@@ -19,12 +19,13 @@ const TUTORIALS = {
     ],
   },
   hotspot: {
-    title: 'Hotspot (non attivo)',
-    intro: 'In questo momento G.A.T.T.O. non crea una rete Wi-Fi propria. È collegato alla Wi-Fi di casa (LaserWiFi), così restano internet e l\'IA.',
+    title: 'Rete Wi-Fi di G.A.T.T.O.',
+    intro: 'Il robot emette anche una rete propria, senza spegnere LaserWiFi né il cloud.',
     steps: [
-      'Non troverai una rete chiamata G.A.T.T.O. nell\'elenco Wi-Fi del telefono.',
-      'Il robot ha una sola antenna: se aprisse un hotspot, perderebbe la rete di casa e il cloud.',
-      'Per usarlo ora, torna su "Già in casa", tieni il telefono sulla stessa Wi-Fi e premi Collega.',
+      'Sul telefono: Impostazioni → Wi-Fi → rete G.A.T.T.O.',
+      'Password: gatto2026',
+      'Dopo il collegamento il robot è all\'indirizzo 192.168.4.1',
+      'Se usi il sito su Vercel, resta su LaserWiFi e premi Collega: da HTTPS l\'app passa dal cloud.',
     ],
   },
 };
@@ -95,10 +96,10 @@ function WifiSetup({ onConnected }) {
         ))}
       </ol>
 
-      {mode === 'hotspot' && (
+      {mode === 'hotspot' && cloud && (
         <p className="wifi-warn">
-          L'hotspot non è acceso di proposito: serve a non staccare G.A.T.T.O. da internet.
-          Usa "Già in casa".
+          Da Vercel non serve entrare nell'hotspot: il browser sicuro parla col robot via cloud.
+          L'hotspot serve se vuoi il collegamento diretto, senza internet.
         </p>
       )}
 
