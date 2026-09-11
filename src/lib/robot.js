@@ -1,5 +1,16 @@
 const STORAGE_KEY = 'gatto-robot-host';
-export const DEFAULT_HOST = '10.0.0.110:5000';
+const MODE_KEY = 'gatto-connect-mode';
+
+export const LAN_HOST = '10.0.0.110:5000';
+export const HOTSPOT_HOST = '192.168.4.1:5000';
+
+export function isHttpsApp() {
+  return typeof window !== 'undefined' && window.location.protocol === 'https:';
+}
+
+export function usesCloudLink() {
+  return isHttpsApp();
+}
 
 export function cleanHost(value) {
   return String(value || '')
@@ -19,55 +30,77 @@ export function setRobotHost(host) {
   return value;
 }
 
+export function getConnectMode() {
+  return localStorage.getItem(MODE_KEY) || 'home';
+}
+
+export function setConnectMode(mode) {
+  localStorage.setItem(MODE_KEY, mode);
+}
+
 export function isPaired() {
   return Boolean(getRobotHost());
 }
 
-export function robotUrl(path = '/') {
-  const host = getRobotHost();
-  if (!host) return '';
-  return `http://${host}${path.startsWith('/') ? path : `/${path}`}`;
+export function markPaired(mode = 'home') {
+  setConnectMode(mode);
+  setRobotHost(usesCloudLink() ? 'cloud' : mode === 'hotspot' ? HOTSPOT_HOST : LAN_HOST);
 }
 
-export async function testRobotConnection(host = getRobotHost()) {
-  const clean = cleanHost(host);
-  if (!clean) return { ok: false, message: "Inserisci l'indirizzo di G.A.T.T.O." };
+export function apiUrl(path = '/status') {
+  const clean = path.startsWith('/') ? path : `/${path}`;
+  const suffix = clean.replace(/^\/api/, '') || '/status';
+  if (usesCloudLink()) {
+    return `/api/robot${suffix}`;
+  }
+  const host = getRobotHost() || LAN_HOST;
+  if (host === 'cloud') {
+    return `http://${LAN_HOST}/api${suffix}`;
+  }
+  return `http://${host}/api${suffix}`;
+}
 
+export async function testRobotConnection() {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
-  const endpoints = ['/api/status', '/api/health', '/api/analyze'];
-
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    for (const path of endpoints) {
-      try {
-        const response = await fetch(`http://${clean}${path}`, {
-          signal: controller.signal,
-        });
-        if (response.ok || response.status < 500) {
-          return { ok: true, message: `Collegato a ${clean}` };
-        }
-      } catch {
-        // prova l'endpoint successivo
-      }
+    const response = await fetch(apiUrl('/api/status'), { signal: controller.signal });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.status === 'success') {
+      return {
+        ok: true,
+        message: usesCloudLink()
+          ? 'G.A.T.T.O. è collegato tramite cloud. L\'intelligenza artificiale resta attiva.'
+          : 'Collegato in rete locale.',
+      };
     }
     return {
       ok: false,
-      message: 'G.A.T.T.O. non risponde. Verifica il Wi‑Fi e l’indirizzo.',
+      message: data.message || 'G.A.T.T.O. ha risposto, ma il collegamento non è valido.',
     };
   } catch (error) {
     if (error.name === 'AbortError') {
-      return { ok: false, message: 'Tempo scaduto. Sei sulla stessa rete Wi‑Fi?' };
+      return {
+        ok: false,
+        message: usesCloudLink()
+          ? 'Tempo scaduto. Accendi G.A.T.T.O. e verifica che sia sulla Wi-Fi di casa.'
+          : 'Tempo scaduto. Sei sulla stessa rete Wi-Fi del robot?',
+      };
     }
-    return { ok: false, message: error.message || 'Collegamento non riuscito.' };
+    return {
+      ok: false,
+      message: usesCloudLink()
+        ? 'Dal sito online non raggiungo G.A.T.T.O. Il robot deve essere acceso e connesso a internet.'
+        : 'G.A.T.T.O. non risponde. Controlla rete e indirizzo.',
+    };
   } finally {
     clearTimeout(timer);
   }
 }
 
 export async function analyzePlant() {
-  const host = getRobotHost();
-  if (!host) throw new Error('Collega prima G.A.T.T.O. dalla sezione Wi‑Fi.');
-  const response = await fetch(robotUrl('/api/analyze'));
+  if (!isPaired()) throw new Error('Collega prima G.A.T.T.O. dalla sezione Wi-Fi.');
+  const response = await fetch(apiUrl('/api/analyze'));
   const data = await response.json();
   if (data.status === 'success') return data.diagnosis;
   throw new Error(data.message || 'Analisi non riuscita');

@@ -14,7 +14,7 @@ import {
   Droplets,
   Wifi,
 } from 'lucide-react';
-import { analyzePlant, getRobotHost, isPaired } from '../lib/robot';
+import { analyzePlant, getRobotHost, isPaired, usesCloudLink } from '../lib/robot';
 import WifiSetup from './WifiSetup';
 
 function MobileApp() {
@@ -25,7 +25,7 @@ function MobileApp() {
   const [loading, setLoading] = useState(false);
   const [iosTip, setIosTip] = useState(false);
   const [online, setOnline] = useState(false);
-  const host = getRobotHost();
+  const host = usesCloudLink() ? 'Cloud · casa' : getRobotHost();
 
   useEffect(() => {
     if (sessionStorage.getItem('gatto-ios-tip') === '1') {

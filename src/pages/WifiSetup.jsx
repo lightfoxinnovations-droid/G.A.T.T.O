@@ -1,74 +1,127 @@
 import { useState } from 'react';
-import { Wifi, WifiOff } from 'lucide-react';
+import { CheckCircle2, House, Smartphone, Wifi, WifiOff } from 'lucide-react';
 import {
-  DEFAULT_HOST,
-  getRobotHost,
-  setRobotHost,
+  getConnectMode,
+  isHttpsApp,
+  markPaired,
+  setConnectMode,
   testRobotConnection,
 } from '../lib/robot';
 
+const TUTORIALS = {
+  home: {
+    title: 'G.A.T.T.O. è già in casa',
+    intro: 'Usa questa modalità tutti i giorni. Il robot resta sulla Wi-Fi di casa: controllo e cloud (IA) funzionano insieme.',
+    steps: [
+      'Accendi G.A.T.T.O. e attendi che la spia di rete sia attiva.',
+      'Tieni il telefono sulla Wi-Fi di casa (non sull\'hotspot del robot).',
+      'Torna qui e premi Collega. L\'app trova il robot, anche se hai aperto il sito da Vercel.',
+    ],
+  },
+  hotspot: {
+    title: 'Prima configurazione (hotspot)',
+    intro: 'Serve solo la prima volta, o se G.A.T.T.O. non e ancora sulla Wi-Fi di casa. In hotspot il telefono perde internet: il cloud si riaccende dopo.',
+    steps: [
+      'Accendi G.A.T.T.O. e aspetta la rete Wi-Fi chiamata G.A.T.T.O.',
+      'Sul telefono: Impostazioni → Wi-Fi → entra nella rete G.A.T.T.O.',
+      'Torna in questa app e premi Collega.',
+      'Quando hai finito, riporta il robot e il telefono sulla Wi-Fi di casa. Cosi tornano IA e notifiche.',
+    ],
+  },
+};
+
 function WifiSetup({ onConnected }) {
-  const [host, setHost] = useState(getRobotHost() || DEFAULT_HOST);
+  const [mode, setMode] = useState(getConnectMode());
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState(null);
+  const cloud = isHttpsApp();
+  const guide = TUTORIALS[mode];
 
   const connect = async (event) => {
     event.preventDefault();
     setChecking(true);
     setResult(null);
-    const test = await testRobotConnection(host);
+    setConnectMode(mode);
+    const test = await testRobotConnection();
     setResult(test);
     setChecking(false);
     if (test.ok) {
-      setRobotHost(host);
-      onConnected?.(getRobotHost());
+      markPaired(mode);
+      onConnected?.();
     }
-  };
-
-  const saveAnyway = () => {
-    setRobotHost(host);
-    onConnected?.(getRobotHost());
   };
 
   return (
     <section className="mapp-panel wifi-panel">
-      <p className="mapp-kicker">Collegamento</p>
-      <h1>Connetti G.A.T.T.O. in Wi‑Fi</h1>
+      <p className="mapp-kicker">Tutorial di collegamento</p>
+      <h1>Come collegarti a G.A.T.T.O.</h1>
+
+      {cloud && (
+        <article className="wifi-banner">
+          Stai usando l'app online. Il telefono non deve entrare nell'hotspot:
+          G.A.T.T.O. resta in casa, internet resta acceso e l'IA continua a funzionare.
+        </article>
+      )}
+
+      <div className="wifi-modes">
+        <button
+          type="button"
+          className={mode === 'home' ? 'active' : ''}
+          onClick={() => {
+            setMode('home');
+            setResult(null);
+          }}
+        >
+          <House size={16} />
+          Già in casa
+        </button>
+        <button
+          type="button"
+          className={mode === 'hotspot' ? 'active' : ''}
+          onClick={() => {
+            setMode('hotspot');
+            setResult(null);
+          }}
+        >
+          <Smartphone size={16} />
+          Hotspot
+        </button>
+      </div>
+
+      <p className="wifi-intro">{guide.intro}</p>
 
       <ol className="wifi-steps">
-        <li>Accendi il robot e attendi la rete Wi‑Fi.</li>
-        <li>Sul telefono entra nella stessa rete di G.A.T.T.O. (casa o hotspot del robot).</li>
-        <li>Inserisci l'indirizzo e verifica il collegamento.</li>
+        {guide.steps.map((step) => (
+          <li key={step}>{step}</li>
+        ))}
       </ol>
 
+      {cloud && mode === 'hotspot' && (
+        <p className="wifi-warn">
+          Da Vercel l'hotspot non basta: il browser sicuro non puo parlare con una rete locale.
+          Usa hotspot solo per configurare il robot, poi passa a "Già in casa".
+        </p>
+      )}
+
       <form className="wifi-form" onSubmit={connect}>
-        <label htmlFor="gatto-host">Indirizzo di G.A.T.T.O.</label>
-        <input
-          id="gatto-host"
-          type="text"
-          inputMode="url"
-          autoComplete="off"
-          placeholder={DEFAULT_HOST}
-          value={host}
-          onChange={(event) => setHost(event.target.value)}
-        />
         <button type="submit" className="mapp-primary" disabled={checking}>
-          {checking ? 'Verifica in corso...' : 'Collega al robot'}
+          {checking ? 'Verifica in corso...' : 'Collega G.A.T.T.O.'}
         </button>
       </form>
 
       {result && (
         <article className={`wifi-result ${result.ok ? 'ok' : 'err'}`}>
-          {result.ok ? <Wifi size={18} /> : <WifiOff size={18} />}
+          {result.ok ? <CheckCircle2 size={18} /> : <WifiOff size={18} />}
           <p>{result.message}</p>
         </article>
       )}
 
-      {result && !result.ok && (
-        <button type="button" className="wifi-skip" onClick={saveAnyway}>
-          Salva comunque e continua
-        </button>
-      )}
+      <p className="wifi-note">
+        <Wifi size={14} />
+        {cloud
+          ? 'Canale: cloud HTTPS. G.A.T.T.O. deve essere acceso e connesso a internet.'
+          : 'Canale: rete locale. Telefono e robot devono essere sulla stessa Wi-Fi.'}
+      </p>
     </section>
   );
 }

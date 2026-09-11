@@ -107,7 +107,7 @@ function Landing() {
         <div className="download-inner">
           <h2>Porta G.A.T.T.O. sul tuo smartphone</h2>
           <p>
-            Scarica l'applicazione: si apre direttamente il collegamento Wi‑Fi con il robot, senza il sito.
+            Scarica l'applicazione: si apre il tutorial di collegamento, non il sito. G.A.T.T.O. resta in casa e il cloud resta attivo.
           </p>
           <div className="download-actions">
             <button type="button" className="store-btn android" onClick={() => openApp('android')}>

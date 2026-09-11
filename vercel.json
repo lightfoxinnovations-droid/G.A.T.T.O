@@ -1,5 +1,8 @@
 {
   "rewrites": [
-    { "source": "/((?!assets/).*)", "destination": "/index.html" }
-  ]
+    { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
+  ],
+  "env": {
+    "GATTO_PUBLIC_URL": "https://soap-browse-difference-foundation.trycloudflare.com"
+  }
 }

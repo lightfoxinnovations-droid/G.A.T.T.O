@@ -4,6 +4,15 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  server: {
+    proxy: {
+      '/api/robot': {
+        target: 'http://10.0.0.110:5000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/robot/, '/api'),
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),

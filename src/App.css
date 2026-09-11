@@ -704,12 +704,79 @@
   cursor: not-allowed;
 }
 
+.wifi-banner,
+.wifi-warn {
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin-bottom: 14px;
+}
+
+.wifi-banner {
+  background: #dcfce7;
+  color: #14532d;
+}
+
+.wifi-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.wifi-modes {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.wifi-modes button {
+  flex: 1;
+  border: 1px solid #dcfce7;
+  background: #fff;
+  color: #4b5563;
+  border-radius: 12px;
+  padding: 10px 8px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.wifi-modes button.active {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+
+.wifi-intro {
+  color: #4b5563;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
 .wifi-steps {
   margin: 0 0 16px;
   padding-left: 18px;
   color: #4b5563;
   font-size: 0.88rem;
   line-height: 1.55;
+}
+
+.wifi-steps li + li {
+  margin-top: 8px;
+}
+
+.wifi-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 0.75rem;
+  margin-top: 12px;
 }
 
 .wifi-form label {
