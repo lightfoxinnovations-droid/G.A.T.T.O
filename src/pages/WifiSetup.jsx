@@ -15,7 +15,7 @@ const TUTORIALS = {
     steps: [
       'Accendi G.A.T.T.O. e attendi che la spia di rete sia attiva.',
       'Tieni il telefono sulla stessa Wi-Fi di casa del robot.',
-      'Torna qui e premi Collega. L\'app trova il robot, anche se hai aperto il sito da Vercel.',
+      'Torna qui e premi Collega. L\'app trova il robot.',
     ],
   },
   hotspot: {
@@ -24,8 +24,7 @@ const TUTORIALS = {
     steps: [
       'Sul telefono: Impostazioni → Wi-Fi → rete G.A.T.T.O.',
       'Password: gatto2026',
-      'Dopo il collegamento il robot è all\'indirizzo 192.168.4.1',
-      'Se usi il sito su Vercel, resta sulla Wi-Fi di casa e premi Collega: da HTTPS l\'app passa dal cloud.',
+      'Torna qui e premi Collega.',
     ],
   },
 };
@@ -95,13 +94,6 @@ function WifiSetup({ onConnected }) {
           <li key={step}>{step}</li>
         ))}
       </ol>
-
-      {mode === 'hotspot' && cloud && (
-        <p className="wifi-warn">
-          Da Vercel non serve entrare nell'hotspot: il browser sicuro parla col robot via cloud.
-          L'hotspot serve se vuoi il collegamento diretto, senza internet.
-        </p>
-      )}
 
       <form className="wifi-form" onSubmit={connect}>
         <button type="submit" className="mapp-primary" disabled={checking}>
