@@ -1,0 +1,15 @@
+[Unit]
+Description=G.A.T.T.O. API
+After=network.target
+
+[Service]
+Type=simple
+User=gatito
+WorkingDirectory=/home/gatito
+EnvironmentFile=-/home/gatito/.config/gatto.env
+ExecStart=/usr/bin/python3 /home/gatito/app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

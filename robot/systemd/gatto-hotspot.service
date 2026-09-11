@@ -1,0 +1,14 @@
+[Unit]
+Description=G.A.T.T.O. hotspot
+After=NetworkManager.service gatto-reset.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=gatito
+ExecStart=/home/gatito/gatto-hotspot/start.sh
+ExecStop=/home/gatito/gatto-hotspot/stop.sh
+
+[Install]
+WantedBy=multi-user.target

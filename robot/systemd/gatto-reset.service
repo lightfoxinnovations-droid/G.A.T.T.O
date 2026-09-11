@@ -1,0 +1,12 @@
+[Unit]
+Description=G.A.T.T.O. wipe saved Wi-Fi on boot
+After=NetworkManager.service
+Before=gatto-hotspot.service
+
+[Service]
+Type=oneshot
+User=gatito
+ExecStart=/home/gatito/gatto-hotspot/reset.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,32 +1,6 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { BellRing, BrainCircuit, History, Route } from 'lucide-react';
 
 function Landing() {
-  const navigate = useNavigate();
-  const [installPrompt, setInstallPrompt] = useState(null);
-
-  useEffect(() => {
-    const onPrompt = (event) => {
-      event.preventDefault();
-      setInstallPrompt(event);
-    };
-    window.addEventListener('beforeinstallprompt', onPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', onPrompt);
-  }, []);
-
-  const openApp = async (platform) => {
-    if (platform === 'android' && installPrompt) {
-      installPrompt.prompt();
-      await installPrompt.userChoice;
-      setInstallPrompt(null);
-    }
-    if (platform === 'ios') {
-      sessionStorage.setItem('gatto-ios-tip', '1');
-    }
-    navigate('/app');
-  };
-
   return (
     <div className="app">
       <nav className="nav">
@@ -107,14 +81,14 @@ function Landing() {
         <div className="download-inner">
           <h2>Porta G.A.T.T.O. sul tuo smartphone</h2>
           <p>
-            Scarica l'applicazione: si apre il tutorial di collegamento, non il sito. G.A.T.T.O. resta in casa e il cloud resta attivo.
+            Scarica l'app, entra nella rete G.A.T.T.O. e scegli la Wi-Fi di casa. La procedura è guidata, passo dopo passo.
           </p>
           <div className="download-actions">
-            <button type="button" className="store-btn android" onClick={() => openApp('android')}>
+            <a className="store-btn android" href="/gatto.apk" download>
               Scarica per Android
-            </button>
-            <button type="button" className="store-btn ios" onClick={() => openApp('ios')}>
-              Scarica per iOS
+            </a>
+            <button type="button" className="store-btn ios" disabled>
+              iOS in arrivo
             </button>
           </div>
         </div>

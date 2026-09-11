@@ -23,3 +23,17 @@ dev-dist
 *.njsproj
 *.sln
 *.sw?
+
+# Flutter
+gatto_app/.dart_tool/
+gatto_app/.flutter-plugins
+gatto_app/.flutter-plugins-dependencies
+gatto_app/build/
+gatto_app/.idea/
+gatto_app/android/.gradle/
+gatto_app/android/build/
+gatto_app/android/local.properties
+gatto_app/android/app/debug
+gatto_app/android/app/profile
+gatto_app/android/app/release
+*.iml

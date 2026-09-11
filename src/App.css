@@ -310,6 +310,11 @@
   box-shadow: 0 4px 12px rgba(20, 83, 45, 0.2);
 }
 
+.store-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (min-width: 480px) {
   .download-actions {
     flex-direction: row;
