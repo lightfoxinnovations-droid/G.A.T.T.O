@@ -14,18 +14,17 @@ const TUTORIALS = {
     intro: 'Usa questa modalità tutti i giorni. Il robot resta sulla Wi-Fi di casa: controllo e cloud (IA) funzionano insieme.',
     steps: [
       'Accendi G.A.T.T.O. e attendi che la spia di rete sia attiva.',
-      'Tieni il telefono sulla Wi-Fi di casa (non sull\'hotspot del robot).',
+      'Tieni il telefono sulla stessa Wi-Fi di casa del robot (LaserWiFi).',
       'Torna qui e premi Collega. L\'app trova il robot, anche se hai aperto il sito da Vercel.',
     ],
   },
   hotspot: {
-    title: 'Prima configurazione (hotspot)',
-    intro: 'Serve solo la prima volta, o se G.A.T.T.O. non e ancora sulla Wi-Fi di casa. In hotspot il telefono perde internet: il cloud si riaccende dopo.',
+    title: 'Hotspot (non attivo)',
+    intro: 'In questo momento G.A.T.T.O. non crea una rete Wi-Fi propria. È collegato alla Wi-Fi di casa (LaserWiFi), così restano internet e l\'IA.',
     steps: [
-      'Accendi G.A.T.T.O. e aspetta la rete Wi-Fi chiamata G.A.T.T.O.',
-      'Sul telefono: Impostazioni → Wi-Fi → entra nella rete G.A.T.T.O.',
-      'Torna in questa app e premi Collega.',
-      'Quando hai finito, riporta il robot e il telefono sulla Wi-Fi di casa. Cosi tornano IA e notifiche.',
+      'Non troverai una rete chiamata G.A.T.T.O. nell\'elenco Wi-Fi del telefono.',
+      'Il robot ha una sola antenna: se aprisse un hotspot, perderebbe la rete di casa e il cloud.',
+      'Per usarlo ora, torna su "Già in casa", tieni il telefono sulla stessa Wi-Fi e premi Collega.',
     ],
   },
 };
@@ -96,10 +95,10 @@ function WifiSetup({ onConnected }) {
         ))}
       </ol>
 
-      {cloud && mode === 'hotspot' && (
+      {mode === 'hotspot' && (
         <p className="wifi-warn">
-          Da Vercel l'hotspot non basta: il browser sicuro non puo parlare con una rete locale.
-          Usa hotspot solo per configurare il robot, poi passa a "Già in casa".
+          L'hotspot non è acceso di proposito: serve a non staccare G.A.T.T.O. da internet.
+          Usa "Già in casa".
         </p>
       )}
 
