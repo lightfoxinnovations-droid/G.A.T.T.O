@@ -79,16 +79,48 @@ class _ControlPageState extends State<ControlPage> {
               ],
             ),
           )
-        else
-          Column(
+        else ...[
+          const Text('Cammina', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+          const SizedBox(height: 6),
+          const Text('Tieni premuto. Sinistra e destra ora sono passi di fianco.', style: TextStyle(color: Color(0xFF6B7280))),
+          const SizedBox(height: 14),
+          _pad(),
+          const SizedBox(height: 22),
+          const Text('Gira sul posto', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text('Pilotaggio manuale', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
-              const SizedBox(height: 8),
-              const Text('Tieni premuto un tasto per muoverlo. Lascia per fermarlo.', style: TextStyle(color: Color(0xFF6B7280))),
-              const SizedBox(height: 16),
-              _pad(),
+              _cell(Icons.undo, 'turn_left', label: 'Gira sx'),
+              const SizedBox(width: 12),
+              _cell(Icons.redo, 'turn_right', label: 'Gira dx'),
             ],
           ),
+          const SizedBox(height: 22),
+          const Text('Inclinati', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _cell(Icons.rotate_90_degrees_ccw, 'tilt_left', label: 'Sx'),
+              const SizedBox(width: 12),
+              _cell(Icons.horizontal_rule, 'level', label: 'Dritto', hold: false),
+              const SizedBox(width: 12),
+              _cell(Icons.rotate_90_degrees_cw, 'tilt_right', label: 'Dx'),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const Text('Altezza', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _cell(Icons.arrow_downward, 'down', label: 'Abbassa'),
+              const SizedBox(width: 12),
+              _cell(Icons.arrow_upward, 'up', label: 'Alza'),
+            ],
+          ),
+        ],
         if (error != null) ...[
           const SizedBox(height: 12),
           Text(error!, style: const TextStyle(color: Color(0xFFB91C1C))),
@@ -98,42 +130,53 @@ class _ControlPageState extends State<ControlPage> {
   }
 
   Widget _pad() {
-    Widget cell(IconData icon, String direction, {Color? color}) {
-      return Listener(
-        onPointerDown: (_) => _hold(direction),
-        onPointerUp: (_) => _release(),
-        onPointerCancel: (_) => _release(),
-        child: SizedBox(
-          width: 64,
-          height: 64,
-          child: FilledButton(
-            onPressed: () {},
-            style: FilledButton.styleFrom(
-              backgroundColor: color ?? gattoGreen,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            ),
-            child: Icon(icon),
-          ),
-        ),
-      );
-    }
-
     return Column(
       children: [
-        cell(Icons.keyboard_arrow_up, 'forward'),
+        _cell(Icons.keyboard_arrow_up, 'forward'),
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            cell(Icons.keyboard_arrow_left, 'left'),
+            _cell(Icons.keyboard_arrow_left, 'left'),
             const SizedBox(width: 10),
-            cell(Icons.stop, 'stop', color: const Color(0xFFEF4444)),
+            _cell(Icons.stop, 'stop', color: const Color(0xFFEF4444)),
             const SizedBox(width: 10),
-            cell(Icons.keyboard_arrow_right, 'right'),
+            _cell(Icons.keyboard_arrow_right, 'right'),
           ],
         ),
         const SizedBox(height: 10),
-        cell(Icons.keyboard_arrow_down, 'backward'),
+        _cell(Icons.keyboard_arrow_down, 'backward'),
+      ],
+    );
+  }
+
+  Widget _cell(IconData icon, String direction, {Color? color, String? label, bool hold = true}) {
+    final button = SizedBox(
+      width: 72,
+      height: 64,
+      child: FilledButton(
+        onPressed: hold ? () {} : () => _hold(direction),
+        style: FilledButton.styleFrom(
+          backgroundColor: color ?? gattoGreen,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+        child: Icon(icon),
+      ),
+    );
+    final body = hold
+        ? Listener(
+            onPointerDown: (_) => _hold(direction),
+            onPointerUp: (_) => _release(),
+            onPointerCancel: (_) => _release(),
+            child: button,
+          )
+        : button;
+    if (label == null) return body;
+    return Column(
+      children: [
+        body,
+        const SizedBox(height: 6),
+        Text(label, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12, fontWeight: FontWeight.w600)),
       ],
     );
   }

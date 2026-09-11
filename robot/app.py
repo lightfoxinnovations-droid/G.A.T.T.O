@@ -18,19 +18,24 @@ IMAGE_PATH = "/home/gatito/test_imx500.jpg"
 HOTSPOT_SSID = "G.A.T.T.O."
 CONNECT_STATE = {"busy": False, "ok": False, "message": "", "ssid": ""}
 DOG_SERVER = "/home/gatito/Freenove_Robot_Dog_Kit_for_Raspberry_Pi/Code/Server"
-MOVE_COMMANDS = {
+WALK_COMMANDS = {
     "forward": "forWard",
     "backward": "backWard",
-    "left": "turnLeft",
-    "right": "turnRight",
-    "stop": "stop",
+    "left": "setpLeft",
+    "right": "setpRight",
+    "turn_left": "turnLeft",
+    "turn_right": "turnRight",
 }
+POSE_COMMANDS = {"up", "down", "tilt_left", "tilt_right", "level"}
+MOVE_COMMANDS = set(WALK_COMMANDS) | POSE_COMMANDS | {"stop"}
 
 picam2 = None
 robot_mode = "autonomous"
 dog = None
 move_direction = "stop"
 move_lock = threading.Lock()
+height_offset = 0
+roll = 0
 
 
 def run(cmd, timeout=40):
@@ -90,28 +95,71 @@ def get_dog():
 
 def apply_gait(direction):
     control = get_dog()
-    action = getattr(control, MOVE_COMMANDS[direction])
-    action()
+    if hasattr(control, "speed"):
+        control.speed = 6 if direction in ("left", "right") else 8
+    getattr(control, WALK_COMMANDS[direction])()
+
+
+def apply_stop():
+    get_dog().stop()
+
+
+def apply_pose():
+    global height_offset, roll
+    control = get_dog()
+    height_offset = max(-28, min(24, height_offset))
+    roll = max(-18, min(18, roll))
+    control.upAndDown(height_offset)
+    control.attitude(roll, 0, 0)
+
+
+def apply_pose_step(direction):
+    global height_offset, roll
+    if direction == "up":
+        height_offset += 6
+    elif direction == "down":
+        height_offset -= 6
+    elif direction == "tilt_left":
+        roll -= 5
+    elif direction == "tilt_right":
+        roll += 5
+    elif direction == "level":
+        height_offset = 0
+        roll = 0
+    apply_pose()
 
 
 def move_loop():
+    global move_direction
     last = "stop"
     while True:
         with move_lock:
             direction = move_direction
             mode = robot_mode
         if mode != "manual" or direction == "stop":
-            if last != "stop":
+            if last in WALK_COMMANDS:
                 try:
-                    apply_gait("stop")
+                    apply_stop()
                 except Exception as error:
                     print("stop motori:", error)
-                last = "stop"
+            last = "stop"
             time.sleep(0.05)
             continue
         try:
-            apply_gait(direction)
-            last = direction
+            if direction in WALK_COMMANDS:
+                apply_gait(direction)
+                last = direction
+            elif direction in POSE_COMMANDS:
+                apply_pose_step(direction)
+                last = direction
+                if direction == "level":
+                    with move_lock:
+                        if move_direction == "level":
+                            move_direction = "stop"
+                else:
+                    time.sleep(0.18)
+            else:
+                time.sleep(0.05)
         except Exception as error:
             print("movimento:", error)
             time.sleep(0.1)
