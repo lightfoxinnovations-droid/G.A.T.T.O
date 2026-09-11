@@ -14,6 +14,35 @@ class ControlPage extends StatefulWidget {
 
 class _ControlPageState extends State<ControlPage> {
   bool autonomous = true;
+  String? error;
+
+  Future<void> _setMode(bool nextAutonomous) async {
+    setState(() {
+      autonomous = nextAutonomous;
+      error = null;
+    });
+    try {
+      await widget.api.setDriveMode(nextAutonomous ? 'autonomous' : 'manual');
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => error = '$err');
+    }
+  }
+
+  Future<void> _hold(String direction) async {
+    try {
+      await widget.api.move(direction);
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => error = '$err');
+    }
+  }
+
+  Future<void> _release() async {
+    try {
+      await widget.api.move('stop');
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +59,7 @@ class _ControlPageState extends State<ControlPage> {
             ButtonSegment(value: false, label: Text('Manuale')),
           ],
           selected: {autonomous},
-          onSelectionChanged: (value) => setState(() => autonomous = value.first),
+          onSelectionChanged: (value) => _setMode(value.first),
         ),
         const SizedBox(height: 16),
         if (autonomous)
@@ -54,47 +83,57 @@ class _ControlPageState extends State<ControlPage> {
           Column(
             children: [
               const Text('Pilotaggio manuale', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+              const SizedBox(height: 8),
+              const Text('Tieni premuto un tasto per muoverlo. Lascia per fermarlo.', style: TextStyle(color: Color(0xFF6B7280))),
               const SizedBox(height: 16),
               _pad(),
             ],
           ),
+        if (error != null) ...[
+          const SizedBox(height: 12),
+          Text(error!, style: const TextStyle(color: Color(0xFFB91C1C))),
+        ],
       ],
     );
   }
 
   Widget _pad() {
-    Widget cell(IconData? icon, {Color? color}) {
-      if (icon == null) return const SizedBox(width: 64, height: 64);
-      return SizedBox(
-        width: 64,
-        height: 64,
-        child: FilledButton(
-          onPressed: () {},
-          style: FilledButton.styleFrom(
-            backgroundColor: color ?? gattoGreen,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    Widget cell(IconData icon, String direction, {Color? color}) {
+      return Listener(
+        onPointerDown: (_) => _hold(direction),
+        onPointerUp: (_) => _release(),
+        onPointerCancel: (_) => _release(),
+        child: SizedBox(
+          width: 64,
+          height: 64,
+          child: FilledButton(
+            onPressed: () {},
+            style: FilledButton.styleFrom(
+              backgroundColor: color ?? gattoGreen,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            child: Icon(icon),
           ),
-          child: Icon(icon),
         ),
       );
     }
 
     return Column(
       children: [
-        cell(Icons.keyboard_arrow_up),
+        cell(Icons.keyboard_arrow_up, 'forward'),
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            cell(Icons.keyboard_arrow_left),
+            cell(Icons.keyboard_arrow_left, 'left'),
             const SizedBox(width: 10),
-            cell(Icons.stop, color: const Color(0xFFEF4444)),
+            cell(Icons.stop, 'stop', color: const Color(0xFFEF4444)),
             const SizedBox(width: 10),
-            cell(Icons.keyboard_arrow_right),
+            cell(Icons.keyboard_arrow_right, 'right'),
           ],
         ),
         const SizedBox(height: 10),
-        cell(Icons.keyboard_arrow_down),
+        cell(Icons.keyboard_arrow_down, 'backward'),
       ],
     );
   }

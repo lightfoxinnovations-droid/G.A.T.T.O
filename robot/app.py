@@ -1,6 +1,7 @@
 import base64
 import os
 import subprocess
+import sys
 import threading
 import time
 from flask import Flask, jsonify, request
@@ -16,8 +17,20 @@ ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 IMAGE_PATH = "/home/gatito/test_imx500.jpg"
 HOTSPOT_SSID = "G.A.T.T.O."
 CONNECT_STATE = {"busy": False, "ok": False, "message": "", "ssid": ""}
+DOG_SERVER = "/home/gatito/Freenove_Robot_Dog_Kit_for_Raspberry_Pi/Code/Server"
+MOVE_COMMANDS = {
+    "forward": "forWard",
+    "backward": "backWard",
+    "left": "turnLeft",
+    "right": "turnRight",
+    "stop": "stop",
+}
 
 picam2 = None
+robot_mode = "autonomous"
+dog = None
+move_direction = "stop"
+move_lock = threading.Lock()
 
 
 def run(cmd, timeout=40):
@@ -59,6 +72,54 @@ def realign_hotspot():
         run(["sudo", "-n", script], timeout=30)
 
 
+def get_dog():
+    global dog
+    if dog is not None:
+        return dog
+    if DOG_SERVER not in sys.path:
+        sys.path.insert(0, DOG_SERVER)
+    here = os.getcwd()
+    os.chdir(DOG_SERVER)
+    try:
+        from Control import Control
+        dog = Control()
+    finally:
+        os.chdir(here)
+    return dog
+
+
+def apply_gait(direction):
+    control = get_dog()
+    action = getattr(control, MOVE_COMMANDS[direction])
+    action()
+
+
+def move_loop():
+    last = "stop"
+    while True:
+        with move_lock:
+            direction = move_direction
+            mode = robot_mode
+        if mode != "manual" or direction == "stop":
+            if last != "stop":
+                try:
+                    apply_gait("stop")
+                except Exception as error:
+                    print("stop motori:", error)
+                last = "stop"
+            time.sleep(0.05)
+            continue
+        try:
+            apply_gait(direction)
+            last = direction
+        except Exception as error:
+            print("movimento:", error)
+            time.sleep(0.1)
+
+
+threading.Thread(target=move_loop, daemon=True).start()
+
+
 def forget_wifi_networks():
     result = run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"])
     for line in result.stdout.splitlines():
@@ -97,8 +158,40 @@ def robot_status():
         "configured": bool(ssid),
         "home_ssid": ssid,
         "internet": has_internet(),
+        "drive_mode": robot_mode,
         "connect": CONNECT_STATE,
     })
+
+
+@app.route("/api/mode", methods=["POST"])
+def set_mode():
+    global robot_mode, move_direction
+    data = request.get_json(silent=True) or {}
+    mode = str(data.get("mode") or "").strip().lower()
+    if mode not in ("autonomous", "manual"):
+        return jsonify({"status": "error", "message": "Usa autonomous oppure manual."}), 400
+    with move_lock:
+        robot_mode = mode
+        if mode != "manual":
+            move_direction = "stop"
+    return jsonify({"status": "success", "mode": robot_mode})
+
+
+@app.route("/api/move", methods=["POST"])
+def move_robot():
+    global move_direction
+    if robot_mode != "manual":
+        return jsonify({
+            "status": "error",
+            "message": "Il robot è in modalità autonoma. Passa a Manuale per guidarlo.",
+        }), 400
+    data = request.get_json(silent=True) or {}
+    direction = str(data.get("direction") or "").strip().lower()
+    if direction not in MOVE_COMMANDS:
+        return jsonify({"status": "error", "message": "Direzione non valida."}), 400
+    with move_lock:
+        move_direction = direction
+    return jsonify({"status": "success", "direction": direction, "mode": robot_mode})
 
 
 @app.route("/api/wifi/scan", methods=["GET"])

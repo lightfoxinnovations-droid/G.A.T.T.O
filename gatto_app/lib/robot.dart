@@ -189,6 +189,36 @@ class RobotApi {
     await persistHost();
   }
 
+  Future<void> setDriveMode(String mode) async {
+    if (host == null) throw Exception('Collega prima G.A.T.T.O.');
+    final response = await http
+        .post(
+          _uri('/api/mode'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'mode': mode}),
+        )
+        .timeout(const Duration(seconds: 6));
+    if (response.statusCode >= 400) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(data['message'] ?? 'Modalità non cambiata.');
+    }
+  }
+
+  Future<void> move(String direction) async {
+    if (host == null) throw Exception('Collega prima G.A.T.T.O.');
+    final response = await http
+        .post(
+          _uri('/api/move'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'direction': direction}),
+        )
+        .timeout(const Duration(seconds: 6));
+    if (response.statusCode >= 400) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(data['message'] ?? 'Movimento non inviato.');
+    }
+  }
+
   Future<String> analyze() async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
     final response = await http.get(_uri('/api/analyze')).timeout(const Duration(seconds: 60));
