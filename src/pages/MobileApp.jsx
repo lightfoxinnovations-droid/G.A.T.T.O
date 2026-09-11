@@ -25,7 +25,7 @@ function MobileApp() {
   const [loading, setLoading] = useState(false);
   const [iosTip, setIosTip] = useState(false);
   const [online, setOnline] = useState(false);
-  const host = usesCloudLink() ? 'Cloud · casa' : getRobotHost();
+  const host = usesCloudLink() ? 'Collegato' : getRobotHost();
 
   useEffect(() => {
     if (sessionStorage.getItem('gatto-ios-tip') === '1') {
