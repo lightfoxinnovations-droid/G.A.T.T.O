@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { CheckCircle2, House, Smartphone, Wifi, WifiOff } from 'lucide-react';
 import {
   getConnectMode,
-  isHttpsApp,
   markPaired,
   setConnectMode,
   testRobotConnection,
@@ -33,7 +32,6 @@ function WifiSetup({ onConnected }) {
   const [mode, setMode] = useState(getConnectMode());
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState(null);
-  const cloud = isHttpsApp();
   const guide = TUTORIALS[mode];
 
   const connect = async (event) => {
@@ -54,13 +52,6 @@ function WifiSetup({ onConnected }) {
     <section className="mapp-panel wifi-panel">
       <p className="mapp-kicker">Tutorial di collegamento</p>
       <h1>Come collegarti a G.A.T.T.O.</h1>
-
-      {cloud && (
-        <article className="wifi-banner">
-          Stai usando l'app online. Il telefono non deve entrare nell'hotspot:
-          G.A.T.T.O. resta in casa, internet resta acceso e l'IA continua a funzionare.
-        </article>
-      )}
 
       <div className="wifi-modes">
         <button
@@ -110,9 +101,7 @@ function WifiSetup({ onConnected }) {
 
       <p className="wifi-note">
         <Wifi size={14} />
-        {cloud
-          ? 'Canale: cloud HTTPS. G.A.T.T.O. deve essere acceso e connesso a internet.'
-          : 'Canale: rete locale. Telefono e robot devono essere sulla stessa Wi-Fi.'}
+        G.A.T.T.O. deve essere acceso.
       </p>
     </section>
   );

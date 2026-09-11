@@ -1,4 +1,4 @@
-const DEFAULT_PUBLIC_URL = 'https://soap-browse-difference-foundation.trycloudflare.com';
+const DEFAULT_PUBLIC_URL = 'https://jackets-uses-reflected-dos.trycloudflare.com';
 
 export default async function handler(req, res) {
   const base = (process.env.GATTO_PUBLIC_URL || DEFAULT_PUBLIC_URL).replace(/\/$/, '');

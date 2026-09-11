@@ -62,36 +62,24 @@ export function apiUrl(path = '/status') {
 
 export async function testRobotConnection() {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetch(apiUrl('/api/status'), { signal: controller.signal });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.status === 'success') {
       return {
         ok: true,
-        message: usesCloudLink()
-          ? 'G.A.T.T.O. è collegato tramite cloud. L\'intelligenza artificiale resta attiva.'
-          : 'Collegato in rete locale.',
+        message: 'G.A.T.T.O. è collegato.',
       };
     }
     return {
       ok: false,
-      message: data.message || 'G.A.T.T.O. ha risposto, ma il collegamento non è valido.',
+      message: 'G.A.T.T.O. non risponde. Accendi il robot e riprova.',
     };
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      return {
-        ok: false,
-        message: usesCloudLink()
-          ? 'Tempo scaduto. Accendi G.A.T.T.O. e verifica che sia sulla Wi-Fi di casa.'
-          : 'Tempo scaduto. Sei sulla stessa rete Wi-Fi del robot?',
-      };
-    }
+  } catch {
     return {
       ok: false,
-      message: usesCloudLink()
-        ? 'Dal sito online non raggiungo G.A.T.T.O. Il robot deve essere acceso e connesso a internet.'
-        : 'G.A.T.T.O. non risponde. Controlla rete e indirizzo.',
+      message: 'G.A.T.T.O. non risponde. Accendi il robot e riprova.',
     };
   } finally {
     clearTimeout(timer);

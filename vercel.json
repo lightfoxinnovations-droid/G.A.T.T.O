@@ -3,6 +3,6 @@
     { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
   ],
   "env": {
-    "GATTO_PUBLIC_URL": "https://soap-browse-difference-foundation.trycloudflare.com"
+    "GATTO_PUBLIC_URL": "https://jackets-uses-reflected-dos.trycloudflare.com"
   }
 }
