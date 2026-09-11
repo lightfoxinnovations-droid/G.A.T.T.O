@@ -81,10 +81,10 @@ function Landing() {
         <div className="download-inner">
           <h2>Porta G.A.T.T.O. sul tuo smartphone</h2>
           <p>
-            Scarica l'app, entra nella rete G.A.T.T.O. e scegli la Wi-Fi di casa. La procedura è guidata, passo dopo passo.
+            Scarica l'app nativa, entra nella rete G.A.T.T.O. e scegli la Wi-Fi di casa. Poi da Controllo puoi guidarlo a mano.
           </p>
           <div className="download-actions">
-            <a className="store-btn android" href="/gatto.apk" download>
+            <a className="store-btn android" href="/gatto.apk?v=2" download="gatto.apk">
               Scarica per Android
             </a>
             <button type="button" className="store-btn ios" disabled>
