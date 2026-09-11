@@ -14,18 +14,18 @@ const TUTORIALS = {
     intro: 'Usa questa modalità tutti i giorni. Il robot resta sulla Wi-Fi di casa: controllo e cloud (IA) funzionano insieme.',
     steps: [
       'Accendi G.A.T.T.O. e attendi che la spia di rete sia attiva.',
-      'Tieni il telefono sulla stessa Wi-Fi di casa del robot (LaserWiFi).',
+      'Tieni il telefono sulla stessa Wi-Fi di casa del robot.',
       'Torna qui e premi Collega. L\'app trova il robot, anche se hai aperto il sito da Vercel.',
     ],
   },
   hotspot: {
     title: 'Rete Wi-Fi di G.A.T.T.O.',
-    intro: 'Il robot emette anche una rete propria, senza spegnere LaserWiFi né il cloud.',
+    intro: 'Il robot emette anche una rete propria, senza spegnere la Wi-Fi di casa né il cloud.',
     steps: [
       'Sul telefono: Impostazioni → Wi-Fi → rete G.A.T.T.O.',
       'Password: gatto2026',
       'Dopo il collegamento il robot è all\'indirizzo 192.168.4.1',
-      'Se usi il sito su Vercel, resta su LaserWiFi e premi Collega: da HTTPS l\'app passa dal cloud.',
+      'Se usi il sito su Vercel, resta sulla Wi-Fi di casa e premi Collega: da HTTPS l\'app passa dal cloud.',
     ],
   },
 };
