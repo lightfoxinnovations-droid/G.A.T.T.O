@@ -183,7 +183,7 @@ class _ControlPageState extends State<ControlPage> {
             Text(
               [
                 if (patrolRunning)
-                  patrolDistance > 0 ? '$patrolMessage · ${patrolDistance} cm' : patrolMessage
+                  patrolDistance > 0 ? '$patrolMessage · $patrolDistance cm' : patrolMessage
                 else
                   'Pattuglia ferma',
                 if (lightText.isNotEmpty) lightText,

@@ -5,7 +5,7 @@ import '../theme.dart';
 import 'control.dart';
 import 'history.dart';
 import 'home.dart';
-import 'sensors.dart';
+import 'settings.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key, required this.api, required this.onReset});
@@ -24,7 +24,7 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final pages = [
       HomePage(api: widget.api),
-      SensorsPage(api: widget.api),
+      SettingsPage(api: widget.api, onReset: widget.onReset),
       ControlPage(api: widget.api),
       HistoryPage(api: widget.api),
     ];
@@ -51,14 +51,10 @@ class _AppShellState extends State<AppShell> {
                       ],
                     ),
                   ),
-                  TextButton(
-                    onPressed: () async {
-                      try {
-                        await widget.api.forget();
-                      } catch (_) {}
-                      widget.onReset();
-                    },
-                    child: const Text('Riconfigura'),
+                  IconButton(
+                    tooltip: 'Impostazioni',
+                    onPressed: () => setState(() => tab = 1),
+                    icon: const Icon(Icons.settings_outlined, color: gattoGreenDark),
                   ),
                 ],
               ),
@@ -72,7 +68,7 @@ class _AppShellState extends State<AppShell> {
         onDestinationSelected: (index) => setState(() => tab = index),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.thermostat_outlined), selectedIcon: Icon(Icons.thermostat), label: 'Sensori'),
+          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Impostazioni'),
           NavigationDestination(icon: Icon(Icons.sports_esports_outlined), selectedIcon: Icon(Icons.sports_esports), label: 'Controllo'),
           NavigationDestination(icon: Icon(Icons.history), label: 'Storico'),
         ],
