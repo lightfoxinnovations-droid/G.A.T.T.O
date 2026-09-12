@@ -35,6 +35,10 @@ class RobotStatus {
     required this.lightOk,
     required this.lightLux,
     required this.lightLabel,
+    required this.alertsLatestId,
+    required this.alertsCount,
+    required this.pushServer,
+    required this.pushTopic,
   });
 
   final bool ok;
@@ -58,12 +62,18 @@ class RobotStatus {
   final bool lightOk;
   final int? lightLux;
   final String lightLabel;
+  final int alertsLatestId;
+  final int alertsCount;
+  final String pushServer;
+  final String pushTopic;
 
   factory RobotStatus.fromJson(Map<String, dynamic> json) {
     final connect = (json['connect'] as Map?) ?? {};
     final patrol = (json['patrol'] as Map?) ?? {};
     final tour = (json['tour'] as Map?) ?? {};
     final light = (json['light'] as Map?) ?? {};
+    final alerts = (json['alerts'] as Map?) ?? {};
+    final push = (json['push'] as Map?) ?? {};
     return RobotStatus(
       ok: json['status'] == 'success',
       configured: json['configured'] == true,
@@ -86,8 +96,203 @@ class RobotStatus {
       lightOk: light['ok'] == true,
       lightLux: light['lux'] is num ? (light['lux'] as num).round() : null,
       lightLabel: '${light['label'] ?? 'Non collegato'}',
+      alertsLatestId: alerts['latest_id'] as int? ?? 0,
+      alertsCount: alerts['count'] as int? ?? 0,
+      pushServer: '${push['server'] ?? 'https://ntfy.sh'}',
+      pushTopic: '${push['topic'] ?? ''}',
     );
   }
+}
+
+class PlantAlert {
+  const PlantAlert({
+    required this.id,
+    required this.severity,
+    required this.title,
+    required this.body,
+    required this.text,
+    required this.image,
+    required this.ts,
+  });
+
+  final int id;
+  final String severity;
+  final String title;
+  final String body;
+  final String text;
+  final String image;
+  final int ts;
+
+  factory PlantAlert.fromJson(Map<String, dynamic> json) {
+    return PlantAlert(
+      id: json['id'] as int? ?? 0,
+      severity: '${json['severity'] ?? 'attenzione'}',
+      title: '${json['title'] ?? 'Avviso pianta'}',
+      body: '${json['body'] ?? ''}',
+      text: '${json['text'] ?? ''}',
+      image: '${json['image'] ?? ''}',
+      ts: json['ts'] as int? ?? 0,
+    );
+  }
+}
+
+class Inspection {
+  const Inspection({
+    required this.id,
+    required this.severity,
+    required this.name,
+    required this.key,
+    required this.title,
+    required this.text,
+    required this.hasImage,
+    required this.ts,
+  });
+
+  final int id;
+  final String severity;
+  final String name;
+  final String key;
+  final String title;
+  final String text;
+  final bool hasImage;
+  final int ts;
+
+  factory Inspection.fromJson(Map<String, dynamic> json) {
+    final name = '${json['name'] ?? 'una pianta'}';
+    return Inspection(
+      id: json['id'] as int? ?? 0,
+      severity: '${json['severity'] ?? 'ok'}',
+      name: name,
+      key: '${json['key'] ?? plantKey(name)}',
+      title: '${json['title'] ?? 'Ispezione'}',
+      text: '${json['text'] ?? ''}',
+      hasImage: json['has_image'] == true,
+      ts: json['ts'] as int? ?? 0,
+    );
+  }
+}
+
+class PlantCompare {
+  const PlantCompare({
+    required this.key,
+    required this.name,
+    required this.count,
+    required this.latest,
+    this.previous,
+    required this.trend,
+    required this.trendText,
+    required this.compareLabel,
+  });
+
+  final String key;
+  final String name;
+  final int count;
+  final Inspection latest;
+  final Inspection? previous;
+  final String trend;
+  final String trendText;
+  final String compareLabel;
+
+  factory PlantCompare.fromJson(Map<String, dynamic> json) {
+    final latest = Inspection.fromJson(Map<String, dynamic>.from(json['latest'] as Map? ?? {}));
+    final prevRaw = json['previous'];
+    return PlantCompare(
+      key: '${json['key'] ?? latest.key}',
+      name: '${json['name'] ?? latest.name}',
+      count: json['count'] as int? ?? 1,
+      latest: latest,
+      previous: prevRaw is Map ? Inspection.fromJson(Map<String, dynamic>.from(prevRaw)) : null,
+      trend: '${json['trend'] ?? 'new'}',
+      trendText: '${json['trend_text'] ?? 'Prima ispezione'}',
+      compareLabel: '${json['compare_label'] ?? ''}',
+    );
+  }
+}
+
+String plantKey(String name) {
+  final raw = name
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-zàèéìòù0-9\s]'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (raw.isEmpty || raw == 'una pianta' || raw == 'non sicuro' || raw == 'sconosciuta') {
+    return 'sconosciuta';
+  }
+  return raw.split(' ').take(3).join(' ');
+}
+
+int severityScore(String severity) {
+  return switch (severity) {
+    'ok' => 2,
+    'attenzione' => 1,
+    'male' => 0,
+    _ => 1,
+  };
+}
+
+String compareWhen(int latestTs, int previousTs) {
+  final days = ((latestTs - previousTs) / 86400).floor().clamp(0, 9999);
+  final hours = ((latestTs - previousTs) / 3600).floor().clamp(0, 9999);
+  if (days >= 2) return '$days giorni fa';
+  if (days == 1) return 'ieri';
+  if (hours >= 2) return '$hours ore fa';
+  return 'visita precedente';
+}
+
+Inspection? pickPrevious(List<Inspection> visits) {
+  if (visits.length < 2) return null;
+  final latest = visits.first;
+  final older = visits.skip(1).where((item) => latest.ts - item.ts >= 20 * 3600).toList();
+  if (older.isEmpty) return visits[1];
+  final target = latest.ts - 7 * 86400;
+  older.sort((a, b) => (a.ts - target).abs().compareTo((b.ts - target).abs()));
+  return older.first;
+}
+
+List<PlantCompare> groupPlants(List<Inspection> items) {
+  final groups = <String, List<Inspection>>{};
+  for (final item in items) {
+    groups.putIfAbsent(item.key, () => []).add(item);
+  }
+  final plants = <PlantCompare>[];
+  for (final entry in groups.entries) {
+    final visits = [...entry.value]..sort((a, b) => b.ts.compareTo(a.ts));
+    final latest = visits.first;
+    final previous = pickPrevious(visits);
+    late final String trend;
+    late final String trendText;
+    var label = '';
+    if (previous == null) {
+      trend = 'new';
+      trendText = 'Prima ispezione';
+    } else {
+      label = compareWhen(latest.ts, previous.ts);
+      final now = severityScore(latest.severity);
+      final then = severityScore(previous.severity);
+      if (now > then) {
+        trend = 'better';
+        trendText = 'Meglio rispetto a $label';
+      } else if (now < then) {
+        trend = 'worse';
+        trendText = 'Peggio rispetto a $label';
+      } else {
+        trend = 'same';
+        trendText = 'Come $label';
+      }
+    }
+    plants.add(PlantCompare(
+      key: entry.key,
+      name: latest.name,
+      count: visits.length,
+      latest: latest,
+      previous: previous,
+      trend: trend,
+      trendText: trendText,
+      compareLabel: label,
+    ));
+  }
+  plants.sort((a, b) => b.latest.ts.compareTo(a.latest.ts));
+  return plants;
 }
 
 class AnalyzeResult {
@@ -154,6 +359,16 @@ class RobotApi {
   Future<String?> lastHost() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('gatto-host');
+  }
+
+  Future<void> markConfigured(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('gatto-configured', value);
+  }
+
+  Future<bool> wasConfigured() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('gatto-configured') ?? false;
   }
 
   Future<bool> _tryHost(String candidate) async {
@@ -268,6 +483,7 @@ class RobotApi {
     await http.post(_uri('/api/wifi/forget')).timeout(const Duration(seconds: 12));
     host = hotspotHost;
     await persistHost();
+    await markConfigured(false);
   }
 
   Future<void> setDriveMode(String mode) async {
@@ -383,5 +599,41 @@ class RobotApi {
       );
     }
     throw Exception(data['message'] ?? 'Analisi non riuscita');
+  }
+
+  Future<List<PlantAlert>> alerts() async {
+    if (host == null) return [];
+    final response = await http.get(_uri('/api/alerts')).timeout(const Duration(seconds: 8));
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = (data['alerts'] as List?) ?? [];
+    return items
+        .whereType<Map>()
+        .map((item) => PlantAlert.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  String? archivePhotoUrl(int id) {
+    if (host == null || id <= 0) return null;
+    return 'http://$host/api/archive/$id.jpg';
+  }
+
+  Future<List<Inspection>> archive() async {
+    final pack = await archivePack();
+    return pack.$1;
+  }
+
+  Future<(List<Inspection>, List<PlantCompare>)> archivePack() async {
+    if (host == null) return (<Inspection>[], <PlantCompare>[]);
+    final response = await http.get(_uri('/api/archive')).timeout(const Duration(seconds: 10));
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = ((data['inspections'] as List?) ?? [])
+        .whereType<Map>()
+        .map((item) => Inspection.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+    final plantsRaw = (data['plants'] as List?) ?? [];
+    final plants = plantsRaw.whereType<Map>().isNotEmpty
+        ? plantsRaw.whereType<Map>().map((item) => PlantCompare.fromJson(Map<String, dynamic>.from(item))).toList()
+        : groupPlants(items);
+    return (items, plants);
   }
 }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:app_settings/app_settings.dart';
 import 'package:flutter/material.dart';
 
+import '../notify.dart';
 import '../robot.dart';
 import '../theme.dart';
 
@@ -23,6 +24,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool resetting = false;
   String homeSsid = '';
   bool internet = false;
+  bool remoteAlerts = false;
   String? error;
   String? chosenSsid;
   List<WifiNetwork> networks = [];
@@ -32,6 +34,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    _loadRemote();
     _loadStatus();
     _poll = Timer.periodic(const Duration(seconds: 4), (_) => _loadStatus());
   }
@@ -43,13 +46,23 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
+  Future<void> _loadRemote() async {
+    final remote = await GattoNotify.hasRemote();
+    if (!mounted) return;
+    setState(() => remoteAlerts = remote);
+  }
+
   Future<void> _loadStatus() async {
     try {
       final status = await widget.api.status();
       if (!mounted || status == null) return;
+      await GattoNotify.rememberTopic(status.pushTopic, status.pushServer);
+      final remote = await GattoNotify.hasRemote();
+      if (!mounted) return;
       setState(() {
         homeSsid = status.homeSsid;
         internet = status.internet;
+        remoteAlerts = remote;
       });
     } catch (_) {}
   }
@@ -148,6 +161,22 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: internet ? gattoGreen : const Color(0xFFD97706),
                   fontWeight: FontWeight.w700,
                 ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Notifiche a distanza', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+              const SizedBox(height: 8),
+              Text(
+                remoteAlerts
+                    ? 'Attive. Se sei fuori casa o il telefono era spento, l\'avviso arriva appena c\'è internet.'
+                    : 'Apri l\'app una volta a casa, collegato a Gatto: poi gli avvisi ti raggiungono anche lontano.',
+                style: const TextStyle(color: Color(0xFF4B5563), height: 1.45),
               ),
             ],
           ),

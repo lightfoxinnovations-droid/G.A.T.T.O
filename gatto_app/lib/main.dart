@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 
+import 'notify.dart';
 import 'robot.dart';
 import 'screens/shell.dart';
 import 'screens/wizard.dart';
 import 'theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await GattoNotify.init();
+  try {
+    await GattoNotify.startBackground();
+  } catch (_) {}
+  await GattoNotify.pollRemote();
   runApp(const GattoApp());
 }
 
@@ -47,14 +53,19 @@ class _BootPageState extends State<BootPage> {
     await api.bindToWifi();
     final found = await api.locate();
     if (!found) {
+      final alreadyReady = await api.wasConfigured();
       if (!mounted) return;
       setState(() {
-        ready = false;
+        ready = alreadyReady;
         checking = false;
       });
       return;
     }
     final status = await api.status();
+    if (status?.configured == true) {
+      await api.markConfigured(true);
+      await GattoNotify.rememberTopic(status!.pushTopic, status.pushServer);
+    }
     if (!mounted) return;
     setState(() {
       ready = status?.configured == true;

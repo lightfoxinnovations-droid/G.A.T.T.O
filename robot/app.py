@@ -2,11 +2,13 @@ import base64
 import io
 import json
 import os
+import re
+import secrets
 import subprocess
 import sys
 import threading
 import time
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, send_file
 from flask_cors import CORS
 from picamera2 import Picamera2
 import requests
@@ -19,6 +21,11 @@ ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 IMAGE_PATH = "/home/gatito/test_imx500.jpg"
 LIVE_PATH = "/tmp/gatto-live.jpg"
 TOUR_PATH = "/home/gatito/.config/gatto-tour.json"
+ALERTS_PATH = "/home/gatito/.config/gatto-alerts.json"
+PUSH_PATH = "/home/gatito/.config/gatto-push.json"
+ARCHIVE_DIR = "/home/gatito/.config/gatto-archive"
+ARCHIVE_PATH = ARCHIVE_DIR + "/index.json"
+ARCHIVE_MAX = 80
 HOTSPOT_SSID = "G.A.T.T.O."
 CONNECT_STATE = {"busy": False, "ok": False, "message": "", "ssid": ""}
 DOG_SERVER = "/home/gatito/Freenove_Robot_Dog_Kit_for_Raspberry_Pi/Code/Server"
@@ -90,6 +97,10 @@ CHAT_MAX = 40
 PENDING_ORDERS = []
 MEMORY = []
 TOUR = {"recording": False, "playing": False, "current": [], "stops": []}
+ALERTS = []
+ALERT_ID = 0
+ARCHIVE = []
+ARCHIVE_ID = 0
 PATROL = {
     "running": False,
     "distance": 0,
@@ -99,13 +110,14 @@ PATROL = {
     "eyes": "idle",
 }
 PLANT_PROMPT = (
-    "Analizza questa pianta. Identifica la specie,"
-    " individua eventuali problemi (foglie ingiallite, malattie"
-    " o parassiti) e fornisci una soluzione pratica per"
-    " risolverli. Spiega il ragionamento in italiano, in modo chiaro."
-    " Se hai un valore di lux misurato, usalo: non inventarlo"
-    " e non contraddirlo. Di' se la luce basta, è poca o è troppa"
-    " per quella pianta, e come spostarla o ombreggiarla."
+    "Analizza questa pianta. Rispondi in italiano, massimo 10 righe,"
+    " frasi corte, niente saggio. Struttura:"
+    " 1) nome della pianta (o 'non sicuro');"
+    " 2) stato: ok / attenzione / male;"
+    " 3) problema principale, se c'è;"
+    " 4) una o due azioni da fare ora;"
+    " 5) se hai un lux misurato, usalo e non inventarlo:"
+    " di' solo se la luce basta, è poca o è troppa."
 )
 BH1750_BUSES = (8, 1)
 BH1750_ADDRS = (0x23, 0x5C)
@@ -251,6 +263,333 @@ def plant_prompt(extra=""):
     parts.append(PLANT_PROMPT)
     parts.append(light_context())
     return "\n\n".join(parts)
+
+
+def shorten_diagnosis(text, max_lines=10):
+    lines = [line.rstrip() for line in (text or "").splitlines() if line.strip()]
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    return "\n".join(lines[:max_lines])
+
+
+def load_alerts():
+    global ALERTS, ALERT_ID
+    try:
+        with open(ALERTS_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+        ALERTS = list(data.get("alerts") or [])
+        ALERT_ID = int(data.get("id") or 0)
+    except Exception:
+        ALERTS = []
+        ALERT_ID = 0
+
+
+def persist_alerts():
+    folder = os.path.dirname(ALERTS_PATH)
+    os.makedirs(folder, exist_ok=True)
+    with open(ALERTS_PATH, "w", encoding="utf-8") as handle:
+        json.dump({"id": ALERT_ID, "alerts": ALERTS}, handle, ensure_ascii=True, indent=2)
+
+
+def diagnosis_severity(text):
+    blob = (text or "").lower()
+    head = blob[:320]
+    if re.search(r"stato\s*[:.\-]?\s*male\b", head):
+        return "male"
+    if re.search(r"stato\s*[:.\-]?\s*attenzione\b", head):
+        return "attenzione"
+    if re.search(r"stato\s*[:.\-]?\s*ok\b", head):
+        return "ok"
+    if any(word in blob for word in ("parassit", "marcium", "ingiall", "fungo")):
+        return "attenzione"
+    return "ok"
+
+
+def plant_name_from(text):
+    for line in (text or "").splitlines():
+        clean = line.strip().lstrip("1234567890).- ").strip()
+        if not clean:
+            continue
+        lower = clean.lower()
+        if lower.startswith("stato") or lower.startswith("luce"):
+            continue
+        return clean[:48]
+    return "una pianta"
+
+
+def plant_key(name):
+    raw = re.sub(r"[^a-zàèéìòù0-9\s]", " ", (name or "").lower())
+    raw = re.sub(r"\s+", " ", raw).strip()
+    if not raw or raw in ("una pianta", "non sicuro", "sconosciuta"):
+        return "sconosciuta"
+    return " ".join(raw.split()[:3])
+
+
+def severity_score(severity):
+    return {"ok": 2, "attenzione": 1, "male": 0}.get(severity, 1)
+
+
+def compare_when(latest_ts, prev_ts):
+    days = max(0, int((latest_ts - prev_ts) / 86400))
+    hours = max(0, int((latest_ts - prev_ts) / 3600))
+    if days >= 2:
+        return f"{days} giorni fa"
+    if days == 1:
+        return "ieri"
+    if hours >= 2:
+        return f"{hours} ore fa"
+    return "visita precedente"
+
+
+def pick_previous(visits):
+    if len(visits) < 2:
+        return None
+    latest = visits[0]
+    older = [item for item in visits[1:] if latest["ts"] - item["ts"] >= 20 * 3600]
+    if not older:
+        return visits[1]
+    target = latest["ts"] - 7 * 86400
+    return min(older, key=lambda item: abs(item["ts"] - target))
+
+
+def inspection_public(item):
+    return {
+        "id": item.get("id") or 0,
+        "severity": item.get("severity") or "ok",
+        "name": item.get("name") or "una pianta",
+        "key": item.get("key") or plant_key(item.get("name") or ""),
+        "title": item.get("title") or "",
+        "text": item.get("text") or "",
+        "has_image": bool(item.get("has_image")),
+        "ts": int(item.get("ts") or 0),
+    }
+
+
+def plants_public():
+    groups = {}
+    for item in ARCHIVE:
+        key = item.get("key") or plant_key(item.get("name") or "")
+        groups.setdefault(key, []).append(item)
+    plants = []
+    for key, visits in groups.items():
+        ordered = list(reversed(visits))
+        latest = ordered[0]
+        previous = pick_previous(ordered)
+        if previous is None:
+            trend = "new"
+            label = ""
+            text = "Prima ispezione"
+        else:
+            label = compare_when(latest["ts"], previous["ts"])
+            now = severity_score(latest.get("severity"))
+            then = severity_score(previous.get("severity"))
+            if now > then:
+                trend = "better"
+                text = f"Meglio rispetto a {label}"
+            elif now < then:
+                trend = "worse"
+                text = f"Peggio rispetto a {label}"
+            else:
+                trend = "same"
+                text = f"Come {label}"
+        plants.append({
+            "key": key,
+            "name": latest.get("name") or key,
+            "count": len(ordered),
+            "latest": inspection_public(latest),
+            "previous": inspection_public(previous) if previous else None,
+            "trend": trend,
+            "trend_text": text,
+            "compare_label": label,
+        })
+    plants.sort(key=lambda item: item["latest"]["ts"], reverse=True)
+    return plants
+
+
+def archive_photo_path(item_id):
+    return os.path.join(ARCHIVE_DIR, f"{int(item_id)}.jpg")
+
+
+def inspection_title(severity, name):
+    plant = name if name and name != "una pianta" else "Una pianta"
+    if severity == "male":
+        return f"{plant} sta male"
+    if severity == "attenzione":
+        return f"{plant} ha bisogno di te"
+    return f"{plant} sta bene" if plant != "Una pianta" else "Pianta in salute"
+
+
+def persist_archive():
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    with open(ARCHIVE_PATH, "w", encoding="utf-8") as handle:
+        json.dump({"id": ARCHIVE_ID, "items": ARCHIVE}, handle, ensure_ascii=True, indent=2)
+
+
+def prune_archive():
+    extra = ARCHIVE[:-ARCHIVE_MAX]
+    del ARCHIVE[:-ARCHIVE_MAX]
+    for item in extra:
+        path = archive_photo_path(item.get("id") or 0)
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
+def write_archive_photo(item_id, photo):
+    if not photo:
+        return False
+    try:
+        raw = base64.b64decode(photo)
+    except Exception:
+        return False
+    if not raw:
+        return False
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    with open(archive_photo_path(item_id), "wb") as handle:
+        handle.write(raw)
+    return True
+
+
+def save_inspection(diagnosis, photo=""):
+    global ARCHIVE_ID
+    if not (diagnosis or "").strip():
+        return None
+    severity = diagnosis_severity(diagnosis)
+    name = plant_name_from(diagnosis)
+    ARCHIVE_ID += 1
+    has_image = write_archive_photo(ARCHIVE_ID, photo)
+    item = {
+        "id": ARCHIVE_ID,
+        "severity": severity,
+        "name": name,
+        "key": plant_key(name),
+        "title": inspection_title(severity, name),
+        "text": diagnosis,
+        "has_image": has_image,
+        "ts": int(time.time()),
+    }
+    ARCHIVE.append(item)
+    prune_archive()
+    persist_archive()
+    return item
+
+
+def migrate_alerts_to_archive():
+    global ARCHIVE_ID
+    if ARCHIVE or not ALERTS:
+        return
+    for alert in ALERTS:
+        item_id = int(alert.get("id") or 0)
+        if item_id <= 0:
+            ARCHIVE_ID += 1
+            item_id = ARCHIVE_ID
+        ARCHIVE_ID = max(ARCHIVE_ID, item_id)
+        photo = alert.get("image") or ""
+        has_image = write_archive_photo(item_id, photo)
+        text = alert.get("text") or alert.get("body") or ""
+        name = plant_name_from(text) if text else "una pianta"
+        severity = alert.get("severity") or diagnosis_severity(text)
+        ARCHIVE.append({
+            "id": item_id,
+            "severity": severity,
+            "name": name,
+            "key": plant_key(name),
+            "title": alert.get("title") or inspection_title(severity, name),
+            "text": text,
+            "has_image": has_image,
+            "ts": int(alert.get("ts") or time.time()),
+        })
+    persist_archive()
+
+
+def load_archive():
+    global ARCHIVE, ARCHIVE_ID
+    try:
+        with open(ARCHIVE_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+        ARCHIVE = list(data.get("items") or [])
+        ARCHIVE_ID = int(data.get("id") or 0)
+    except Exception:
+        ARCHIVE = []
+        ARCHIVE_ID = 0
+    migrate_alerts_to_archive()
+
+
+def archive_public():
+    return [inspection_public(item) for item in reversed(ARCHIVE)]
+
+
+def maybe_alert_plant(diagnosis, photo=""):
+    global ALERT_ID
+    severity = diagnosis_severity(diagnosis)
+    if severity == "ok":
+        return None
+    name = plant_name_from(diagnosis)
+    title = "Una pianta sta male" if severity == "male" else "Una pianta ha bisogno di te"
+    body = diagnosis.splitlines()[0] if diagnosis else name
+    if name and name.lower() not in body.lower():
+        body = f"{name}: {body}"
+    ALERT_ID += 1
+    item = {
+        "id": ALERT_ID,
+        "severity": severity,
+        "title": title,
+        "body": body[:180],
+        "text": diagnosis,
+        "image": photo or "",
+        "ts": int(time.time()),
+    }
+    ALERTS.append(item)
+    del ALERTS[:-30]
+    persist_alerts()
+    add_chat("system", f"Avviso: {title}")
+    send_remote_push(title, item["body"], item["id"])
+    return item
+
+
+def push_config():
+    try:
+        with open(PUSH_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+        if data.get("topic") and data.get("server"):
+            return data
+    except Exception:
+        pass
+    data = {
+        "server": os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/"),
+        "topic": "gatto-" + secrets.token_hex(16),
+    }
+    folder = os.path.dirname(PUSH_PATH)
+    os.makedirs(folder, exist_ok=True)
+    with open(PUSH_PATH, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=True, indent=2)
+    return data
+
+
+def send_remote_push(title, body, alert_id):
+    def work():
+        try:
+            cfg = push_config()
+            requests.post(
+                f"{cfg['server']}/{cfg['topic']}",
+                headers={
+                    "Title": (title or "G.A.T.T.O.")[:80],
+                    "Priority": "5",
+                    "Tags": "warning",
+                    "X-Gatto-Id": str(alert_id),
+                },
+                data=(body or title or "").encode("utf-8"),
+                timeout=8,
+            )
+        except Exception as error:
+            print("push remoto:", error)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def alerts_public():
+    return list(reversed(ALERTS))
 
 
 def _init_camera_unlocked():
@@ -793,10 +1132,13 @@ def inspect_plant(extra=""):
     prompt = plant_prompt(extra)
     try:
         diagnosis, photo = ask_vision(prompt)
+        diagnosis = shorten_diagnosis(diagnosis)
         PATROL["diagnosis"] = diagnosis
         PATROL["diagnosis_image"] = photo
         PATROL["message"] = "Pianta analizzata, continuo"
         add_chat("ai", diagnosis, action="inspect", image=photo)
+        save_inspection(diagnosis, photo)
+        maybe_alert_plant(diagnosis, photo)
     except Exception as error:
         PATROL["message"] = "Analisi non riuscita, continuo"
         add_chat("system", f"Analisi non riuscita: {error}")
@@ -1125,6 +1467,9 @@ def connect_wifi(ssid, password):
 
 
 load_tour()
+load_alerts()
+load_archive()
+push_config()
 threading.Thread(target=move_loop, daemon=True).start()
 threading.Thread(target=patrol_loop, daemon=True).start()
 threading.Thread(target=camera_loop, daemon=True).start()
@@ -1146,6 +1491,15 @@ def robot_status():
         "tour": tour_public(),
         "connect": CONNECT_STATE,
         "light": light_public(),
+        "alerts": {
+            "latest_id": ALERT_ID,
+            "count": len(ALERTS),
+        },
+        "archive": {
+            "latest_id": ARCHIVE_ID,
+            "count": len(ARCHIVE),
+        },
+        "push": push_config(),
     })
 
 
@@ -1337,17 +1691,43 @@ def tour_clear():
     return jsonify({"status": "success", "tour": tour_public()})
 
 
+@app.route("/api/alerts", methods=["GET"])
+def alerts_list():
+    return jsonify({"status": "success", "alerts": alerts_public()})
+
+
+@app.route("/api/archive", methods=["GET"])
+def archive_list():
+    return jsonify({
+        "status": "success",
+        "inspections": archive_public(),
+        "plants": plants_public(),
+    })
+
+
+@app.route("/api/archive/<int:item_id>.jpg", methods=["GET"])
+def archive_photo(item_id):
+    path = archive_photo_path(item_id)
+    if not os.path.isfile(path):
+        return Response(b"", status=404)
+    return send_file(path, mimetype="image/jpeg")
+
+
 @app.route("/api/analyze", methods=["GET"])
 def analyze_plant():
     try:
         diagnosis, photo = ask_vision(plant_prompt())
+        diagnosis = shorten_diagnosis(diagnosis)
         PATROL["diagnosis"] = diagnosis
         PATROL["diagnosis_image"] = photo
         add_chat("ai", diagnosis, action="inspect", image=photo)
+        save_inspection(diagnosis, photo)
+        alert = maybe_alert_plant(diagnosis, photo)
         return jsonify({
             "status": "success",
             "diagnosis": diagnosis,
             "image": photo,
+            "alert": alert,
             "light": light_public(),
         })
     except Exception as error:

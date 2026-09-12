@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../notify.dart';
 import '../robot.dart';
 import '../theme.dart';
 import 'control.dart';
@@ -53,6 +54,7 @@ class _AppShellState extends State<AppShell> {
           linked = false;
           linkLabel = 'Senza rete';
         });
+        await GattoNotify.pollRemote();
         return;
       }
       setState(() {
@@ -65,12 +67,21 @@ class _AppShellState extends State<AppShell> {
           linkLabel = 'Collegato, senza internet';
         }
       });
+      await GattoNotify.rememberTopic(status.pushTopic, status.pushServer);
+      final seen = await GattoNotify.lastSeenId();
+      if (status.alertsLatestId > seen) {
+        try {
+          final items = await widget.api.alerts();
+          await GattoNotify.pushNew(items);
+        } catch (_) {}
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
         linked = false;
         linkLabel = 'Senza rete';
       });
+      await GattoNotify.pollRemote();
     }
   }
 
@@ -138,7 +149,7 @@ class _AppShellState extends State<AppShell> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.sports_esports_outlined), selectedIcon: Icon(Icons.sports_esports), label: 'Controllo'),
-          NavigationDestination(icon: Icon(Icons.history), selectedIcon: Icon(Icons.history), label: 'Storico'),
+          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Archivio'),
         ],
       ),
     );
