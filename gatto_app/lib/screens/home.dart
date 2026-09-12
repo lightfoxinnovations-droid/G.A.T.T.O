@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../robot.dart';
@@ -14,7 +16,55 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   bool loading = false;
+  bool patrolBusy = false;
+  bool patrolActive = false;
   String diagnosis = '';
+  String patrolTitle = 'Fermo';
+  String patrolSubtitle = 'Pattugliamento';
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPatrol();
+    _poll = Timer.periodic(const Duration(seconds: 3), (_) => _loadPatrol());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadPatrol() async {
+    try {
+      final status = await widget.api.status();
+      if (!mounted || status == null) return;
+      setState(() {
+        patrolActive = status.driveMode == 'autonomous';
+        patrolSubtitle = 'Pattugliamento';
+        if (status.driveMode == 'autonomous' && status.patrolRunning) {
+          patrolTitle = status.patrolMessage.isEmpty ? 'L\'IA sta guidando' : status.patrolMessage;
+        } else if (status.driveMode == 'autonomous') {
+          patrolTitle = 'Autonomo, in attesa';
+        } else {
+          patrolTitle = 'Fermo';
+        }
+        if (!loading && status.patrolDiagnosis.isNotEmpty) {
+          diagnosis = status.patrolDiagnosis;
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _togglePatrol() async {
+    setState(() => patrolBusy = true);
+    try {
+      await widget.api.setDriveMode(patrolActive ? 'manual' : 'autonomous');
+      await _loadPatrol();
+    } catch (_) {}
+    if (mounted) setState(() => patrolBusy = false);
+  }
 
   Future<void> _scan() async {
     setState(() {
@@ -52,23 +102,34 @@ class _HomePageState extends State<HomePage> {
             gradient: const LinearGradient(colors: [gattoGreen, gattoGreenDark]),
             borderRadius: BorderRadius.circular(18),
           ),
-          child: const Row(
+          child: Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Pattugliamento', style: TextStyle(color: Colors.white70)),
-                    SizedBox(height: 4),
-                    Text('Autonomo attivo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
+                    Text(patrolSubtitle, style: const TextStyle(color: Colors.white70)),
+                    const SizedBox(height: 4),
+                    Text(patrolTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
                   ],
                 ),
               ),
-              Icon(Icons.eco, color: Colors.white, size: 32),
+              const Icon(Icons.eco, color: Colors.white, size: 32),
             ],
           ),
         ),
         const SizedBox(height: 14),
+        FilledButton(
+          onPressed: patrolBusy ? null : _togglePatrol,
+          child: Text(
+            patrolBusy
+                ? 'Attendi...'
+                : patrolActive
+                    ? 'Ferma pattuglia'
+                    : 'Avvia pattuglia',
+          ),
+        ),
+        const SizedBox(height: 10),
         FilledButton(
           onPressed: loading ? null : _scan,
           child: Text(loading ? 'Analisi in corso...' : 'Avvia scansione'),

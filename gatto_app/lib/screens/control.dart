@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../robot.dart';
@@ -13,16 +15,55 @@ class ControlPage extends StatefulWidget {
 }
 
 class _ControlPageState extends State<ControlPage> {
-  bool autonomous = true;
+  bool autonomous = false;
   String? error;
+  String patrolMessage = 'In attesa';
+  int patrolDistance = 0;
+  bool patrolRunning = false;
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFromRobot();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  void _watchPatrol(bool enabled) {
+    _poll?.cancel();
+    if (!enabled) return;
+    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _syncFromRobot());
+  }
+
+  Future<void> _syncFromRobot() async {
+    try {
+      final status = await widget.api.status();
+      if (!mounted || status == null) return;
+      setState(() {
+        autonomous = status.driveMode == 'autonomous';
+        patrolRunning = status.patrolRunning;
+        patrolDistance = status.patrolDistance;
+        patrolMessage = status.patrolMessage.isEmpty ? 'In attesa' : status.patrolMessage;
+      });
+      if (autonomous && _poll == null) _watchPatrol(true);
+    } catch (_) {}
+  }
 
   Future<void> _setMode(bool nextAutonomous) async {
     setState(() {
       autonomous = nextAutonomous;
       error = null;
+      patrolMessage = nextAutonomous ? 'Avvio pattuglia...' : 'Pattuglia ferma';
     });
+    _watchPatrol(nextAutonomous);
     try {
       await widget.api.setDriveMode(nextAutonomous ? 'autonomous' : 'manual');
+      await _syncFromRobot();
     } catch (err) {
       if (!mounted) return;
       setState(() => error = '$err');
@@ -70,12 +111,28 @@ class _ControlPageState extends State<ControlPage> {
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: const Color(0xFFDCFCE7)),
             ),
-            child: const Column(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Percorso in corso', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
-                SizedBox(height: 8),
-                Text('G.A.T.T.O. sta ispezionando i vasi del balcone. Nessun intervento richiesto.'),
+                Text(
+                  patrolRunning ? 'Pattuglia in corso' : 'Pattuglia ferma',
+                  style: const TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  patrolMessage,
+                  style: const TextStyle(color: Color(0xFF4B5563), height: 1.45),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  patrolDistance > 0 ? 'Distanza: $patrolDistance cm' : 'Sensore in attesa',
+                  style: const TextStyle(color: Color(0xFF6B7280), fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'La stessa IA delle piante guarda la camera e decide dove andare. L\'ultrasuono ferma solo se c\'è un ostacolo vicino. Passa a Manuale per fermarlo.',
+                  style: TextStyle(color: Color(0xFF6B7280)),
+                ),
               ],
             ),
           )

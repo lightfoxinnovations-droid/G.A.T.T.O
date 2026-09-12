@@ -1,5 +1,7 @@
 import base64
+import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -28,12 +30,37 @@ POSE_COMMANDS = {"up", "down", "tilt_left", "tilt_right", "level"}
 MOVE_COMMANDS = set(WALK_COMMANDS) | POSE_COMMANDS | {"stop"}
 
 picam2 = None
-robot_mode = "autonomous"
+robot_mode = "manual"
 dog = None
+sonic = None
 move_direction = "stop"
 move_lock = threading.Lock()
 height_offset = 0
 roll = 0
+patrol_active = False
+PATROL = {"running": False, "distance": 0, "message": "In attesa", "diagnosis": ""}
+OBSTACLE_CM = 28
+VISION_MODEL = "openrouter/free"
+camera_lock = threading.Lock()
+PLANT_PROMPT = (
+    "Analizza questa pianta. Identifica la specie,"
+    " individua eventuali problemi (foglie ingiallite, malattie"
+    " o parassiti) e fornisci una soluzione pratica per"
+    " risolverli."
+)
+NAV_PROMPT = """Sei gli occhi di G.A.T.T.O., un cane robot in un orto o balcone.
+Guarda la foto e scegli UN movimento per pattugliare, avvicinarti ai vasi e analizzare le piante senza urtare ostacoli o cadere.
+Rispondi SOLO con JSON valido, senza markdown:
+{"action":"forward","reason":"frase breve in italiano","plant_seen":false,"diagnosis":""}
+action può essere solo: forward, left, right, backward, inspect, stop.
+Regole:
+- forward: c'è spazio, avanza verso piante o per esplorare
+- left / right: gira per evitare un ostacolo o per inquadrare meglio una pianta
+- backward: sei troppo vicino a un ostacolo
+- inspect: una pianta è vicina e ben visibile, va analizzata ora
+- stop: pericolo o scena poco chiara
+- diagnosis: se vedi una pianta, una riga su specie o problema, altrimenti stringa vuota
+"""
 
 
 def run(cmd, timeout=40):
@@ -53,6 +80,56 @@ def get_camera():
         picam2.start()
         time.sleep(2)
     return picam2
+
+
+def capture_jpeg_b64():
+    with camera_lock:
+        cam = get_camera()
+        cam.capture_file(IMAGE_PATH)
+        with open(IMAGE_PATH, "rb") as handle:
+            return base64.b64encode(handle.read()).decode("utf-8")
+
+
+def ask_vision(prompt, timeout=55):
+    if not API_KEY:
+        raise RuntimeError("Chiave OpenRouter mancante sul robot.")
+    image = capture_jpeg_b64()
+    response = requests.post(
+        ENDPOINT,
+        headers={
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": VISION_MODEL,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image}"},
+                    },
+                ],
+            }],
+        },
+        timeout=timeout,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"Errore API OpenRouter: {response.text}")
+    return response.json()["choices"][0]["message"]["content"]
+
+
+def parse_ai_json(text):
+    raw = str(text or "").strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+    if fence:
+        raw = fence.group(1)
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("Risposta IA senza JSON")
+    return json.loads(raw[start:end + 1])
 
 
 def home_ssid():
@@ -102,6 +179,20 @@ def get_dog():
 def apply_gait(direction):
     control = get_dog()
     getattr(control, WALK_COMMANDS[direction])()
+
+
+def get_distance_cm():
+    global sonic
+    try:
+        if sonic is None:
+            if DOG_SERVER not in sys.path:
+                sys.path.insert(0, DOG_SERVER)
+            from Ultrasonic import Ultrasonic
+            sonic = Ultrasonic()
+        return int(sonic.get_distance())
+    except Exception as error:
+        print("ultrasuoni:", error)
+        return 80
 
 
 def apply_stop():
@@ -169,7 +260,108 @@ def move_loop():
             time.sleep(0.1)
 
 
+def still_patrolling():
+    return patrol_active and robot_mode == "autonomous"
+
+
+def avoid_obstacle(distance, turn_right):
+    PATROL["message"] = f"Ostacolo a {distance} cm, l'IA aspetta: giro"
+    get_dog().backWard()
+    for _ in range(3):
+        if not still_patrolling():
+            return not turn_right
+        if turn_right:
+            get_dog().turnRight()
+        else:
+            get_dog().turnLeft()
+    return not turn_right
+
+
+def apply_ai_action(action, skip_inspect):
+    if action == "inspect":
+        if skip_inspect:
+            get_dog().turnRight()
+            return False
+        PATROL["message"] = "L'IA sta analizzando la pianta..."
+        diagnosis = ask_vision(PLANT_PROMPT)
+        PATROL["diagnosis"] = diagnosis
+        PATROL["message"] = "Pianta analizzata, continuo"
+        if still_patrolling():
+            get_dog().turnRight()
+        return True
+    if action == "left":
+        get_dog().turnLeft()
+        if still_patrolling():
+            get_dog().turnLeft()
+        return skip_inspect
+    if action == "right":
+        get_dog().turnRight()
+        if still_patrolling():
+            get_dog().turnRight()
+        return skip_inspect
+    if action == "backward":
+        apply_gait("backward")
+        return skip_inspect
+    if action == "stop":
+        apply_stop()
+        time.sleep(1)
+        return skip_inspect
+    for _ in range(3):
+        if not still_patrolling():
+            break
+        distance = get_distance_cm()
+        PATROL["distance"] = distance
+        if 0 < distance < OBSTACLE_CM:
+            break
+        apply_gait("forward")
+    return skip_inspect
+
+
+def patrol_loop():
+    turn_right = True
+    skip_inspect = False
+    while True:
+        if not still_patrolling():
+            if PATROL["running"]:
+                PATROL.update(running=False, message="Pattuglia ferma")
+                try:
+                    apply_stop()
+                except Exception:
+                    pass
+            time.sleep(0.2)
+            continue
+        PATROL["running"] = True
+        try:
+            distance = get_distance_cm()
+            PATROL["distance"] = distance
+            if 0 < distance < OBSTACLE_CM:
+                turn_right = avoid_obstacle(distance, turn_right)
+                continue
+            PATROL["message"] = "L'IA sta guardando l'orto..."
+            text = ask_vision(NAV_PROMPT)
+            data = parse_ai_json(text)
+            action = str(data.get("action") or "forward").strip().lower()
+            reason = str(data.get("reason") or "").strip()
+            note = str(data.get("diagnosis") or "").strip()
+            if reason:
+                PATROL["message"] = reason
+            if note:
+                PATROL["diagnosis"] = note
+            if still_patrolling():
+                skip_inspect = apply_ai_action(action, skip_inspect)
+        except Exception as error:
+            PATROL["message"] = f"IA non disponibile, avanzo: {error}"
+            try:
+                if still_patrolling() and get_distance_cm() >= OBSTACLE_CM:
+                    apply_gait("forward")
+                else:
+                    time.sleep(0.4)
+            except Exception:
+                time.sleep(0.4)
+
+
 threading.Thread(target=move_loop, daemon=True).start()
+threading.Thread(target=patrol_loop, daemon=True).start()
 
 
 def forget_wifi_networks():
@@ -211,22 +403,31 @@ def robot_status():
         "home_ssid": ssid,
         "internet": has_internet(),
         "drive_mode": robot_mode,
+        "patrol": PATROL,
         "connect": CONNECT_STATE,
     })
 
 
 @app.route("/api/mode", methods=["POST"])
 def set_mode():
-    global robot_mode, move_direction
+    global robot_mode, move_direction, patrol_active
     data = request.get_json(silent=True) or {}
     mode = str(data.get("mode") or "").strip().lower()
     if mode not in ("autonomous", "manual"):
         return jsonify({"status": "error", "message": "Usa autonomous oppure manual."}), 400
     with move_lock:
         robot_mode = mode
-        if mode != "manual":
-            move_direction = "stop"
-    return jsonify({"status": "success", "mode": robot_mode})
+        move_direction = "stop"
+        patrol_active = mode == "autonomous"
+    if patrol_active:
+        PATROL.update(running=True, message="Pattuglia avviata")
+    else:
+        PATROL.update(running=False, message="Pattuglia ferma")
+        try:
+            apply_stop()
+        except Exception:
+            pass
+    return jsonify({"status": "success", "mode": robot_mode, "patrol": PATROL})
 
 
 @app.route("/api/move", methods=["POST"])
@@ -297,52 +498,9 @@ def wifi_forget():
 @app.route("/api/analyze", methods=["GET"])
 def analyze_plant():
     try:
-        if not API_KEY:
-            return jsonify({
-                "status": "error",
-                "message": "Chiave OpenRouter mancante sul robot.",
-            }), 500
-
-        cam = get_camera()
-        cam.capture_file(IMAGE_PATH)
-
-        with open(IMAGE_PATH, "rb") as handle:
-            base64_image = base64.b64encode(handle.read()).decode("utf-8")
-
-        headers = {
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": "openrouter/free",
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "Analizza questa pianta. Identifica la specie,"
-                            " individua eventuali problemi (foglie ingiallite, malattie"
-                            " o parassiti) e fornisci una soluzione pratica per"
-                            " risolverli."
-                        ),
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                    },
-                ],
-            }],
-        }
-
-        response = requests.post(ENDPOINT, headers=headers, json=payload)
-        if response.status_code == 200:
-            diagnosis = response.json()["choices"][0]["message"]["content"]
-            return jsonify({"status": "success", "diagnosis": diagnosis})
-        return jsonify({
-            "status": "error",
-            "message": f"Errore API OpenRouter: {response.text}",
-        }), 500
+        diagnosis = ask_vision(PLANT_PROMPT)
+        PATROL["diagnosis"] = diagnosis
+        return jsonify({"status": "success", "diagnosis": diagnosis})
     except Exception as error:
         return jsonify({"status": "error", "message": str(error)}), 500
 

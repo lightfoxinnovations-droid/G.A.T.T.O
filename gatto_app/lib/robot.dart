@@ -21,6 +21,11 @@ class RobotStatus {
     required this.connectBusy,
     required this.connectOk,
     required this.connectMessage,
+    required this.driveMode,
+    required this.patrolRunning,
+    required this.patrolDistance,
+    required this.patrolMessage,
+    required this.patrolDiagnosis,
   });
 
   final bool ok;
@@ -30,9 +35,15 @@ class RobotStatus {
   final bool connectBusy;
   final bool connectOk;
   final String connectMessage;
+  final String driveMode;
+  final bool patrolRunning;
+  final int patrolDistance;
+  final String patrolMessage;
+  final String patrolDiagnosis;
 
   factory RobotStatus.fromJson(Map<String, dynamic> json) {
     final connect = (json['connect'] as Map?) ?? {};
+    final patrol = (json['patrol'] as Map?) ?? {};
     return RobotStatus(
       ok: json['status'] == 'success',
       configured: json['configured'] == true,
@@ -41,6 +52,11 @@ class RobotStatus {
       connectBusy: connect['busy'] == true,
       connectOk: connect['ok'] == true,
       connectMessage: '${connect['message'] ?? ''}',
+      driveMode: '${json['drive_mode'] ?? 'manual'}',
+      patrolRunning: patrol['running'] == true,
+      patrolDistance: patrol['distance'] as int? ?? 0,
+      patrolMessage: '${patrol['message'] ?? ''}',
+      patrolDiagnosis: '${patrol['diagnosis'] ?? ''}',
     );
   }
 }
