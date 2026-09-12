@@ -82,20 +82,9 @@ class _ControlPageState extends State<ControlPage> {
         else ...[
           const Text('Cammina', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
           const SizedBox(height: 6),
-          const Text('Tieni premuto. Sinistra e destra ora sono passi di fianco.', style: TextStyle(color: Color(0xFF6B7280))),
+          const Text('Tieni premuto: avanza o indietreggia alzando le zampe.', style: TextStyle(color: Color(0xFF6B7280))),
           const SizedBox(height: 14),
           _pad(),
-          const SizedBox(height: 22),
-          const Text('Gira sul posto', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _cell(Icons.undo, 'turn_left', label: 'Gira sx'),
-              const SizedBox(width: 12),
-              _cell(Icons.redo, 'turn_right', label: 'Gira dx'),
-            ],
-          ),
           const SizedBox(height: 22),
           const Text('Inclinati', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
           const SizedBox(height: 10),
@@ -134,16 +123,7 @@ class _ControlPageState extends State<ControlPage> {
       children: [
         _cell(Icons.keyboard_arrow_up, 'forward'),
         const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _cell(Icons.keyboard_arrow_left, 'left'),
-            const SizedBox(width: 10),
-            _cell(Icons.stop, 'stop', color: const Color(0xFFEF4444)),
-            const SizedBox(width: 10),
-            _cell(Icons.keyboard_arrow_right, 'right'),
-          ],
-        ),
+        _cell(Icons.stop, 'stop', color: const Color(0xFFEF4444)),
         const SizedBox(height: 10),
         _cell(Icons.keyboard_arrow_down, 'backward'),
       ],

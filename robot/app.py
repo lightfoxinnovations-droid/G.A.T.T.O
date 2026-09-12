@@ -1,4 +1,5 @@
 import base64
+import math
 import os
 import subprocess
 import sys
@@ -21,10 +22,6 @@ DOG_SERVER = "/home/gatito/Freenove_Robot_Dog_Kit_for_Raspberry_Pi/Code/Server"
 WALK_COMMANDS = {
     "forward": "forWard",
     "backward": "backWard",
-    "left": "setpLeft",
-    "right": "setpRight",
-    "turn_left": "turnLeft",
-    "turn_right": "turnRight",
 }
 POSE_COMMANDS = {"up", "down", "tilt_left", "tilt_right", "level"}
 MOVE_COMMANDS = set(WALK_COMMANDS) | POSE_COMMANDS | {"stop"}
@@ -72,6 +69,14 @@ def has_internet():
 
 
 def realign_hotspot():
+    # Se l'hotspot è già in onda non lo riavviare: sul chip brcmfmac
+    # distruggere ap0 fa cadere anche la Wi-Fi di casa.
+    check = run(["/usr/sbin/iw", "dev", "ap0", "info"], timeout=5)
+    if check.returncode == 0 and "type AP" in check.stdout:
+        return
+    if run(["systemctl", "is-enabled", "gatto-hotspot.service"], timeout=5).returncode == 0:
+        run(["sudo", "-n", "systemctl", "restart", "gatto-hotspot.service"], timeout=30)
+        return
     script = "/home/gatito/gatto-hotspot/start.sh"
     if os.path.isfile(script):
         run(["sudo", "-n", script], timeout=30)
@@ -93,11 +98,31 @@ def get_dog():
     return dog
 
 
+def walk_cycle(control, reverse=False):
+    # Il passo Freenove di default alza poco le zampe e sembra uno strisciare.
+    # Y sotto "height" = zampa sollevata; alziamo di più il passo.
+    speed = 8
+    height = control.height
+    lift = 20
+    stride = 12
+    angles = range(450, 89, -speed) if reverse else range(90, 451, speed)
+    name = "backWard" if reverse else "forWard"
+    for angle in angles:
+        rad = angle * math.pi / 180
+        x1 = stride * math.cos(rad)
+        y1 = lift * math.sin(rad) + height
+        x2 = stride * math.cos(rad + math.pi)
+        y2 = lift * math.sin(rad + math.pi) + height
+        if y1 > height:
+            y1 = height
+        if y2 > height:
+            y2 = height
+        control.changeCoordinates(name, x1, y1, 0, x2, y2, 0)
+
+
 def apply_gait(direction):
     control = get_dog()
-    if hasattr(control, "speed"):
-        control.speed = 6 if direction in ("left", "right") else 8
-    getattr(control, WALK_COMMANDS[direction])()
+    walk_cycle(control, reverse=(direction == "backward"))
 
 
 def apply_stop():
