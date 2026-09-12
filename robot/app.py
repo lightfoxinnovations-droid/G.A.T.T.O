@@ -1,5 +1,4 @@
 import base64
-import math
 import os
 import subprocess
 import sys
@@ -22,6 +21,8 @@ DOG_SERVER = "/home/gatito/Freenove_Robot_Dog_Kit_for_Raspberry_Pi/Code/Server"
 WALK_COMMANDS = {
     "forward": "forWard",
     "backward": "backWard",
+    "left": "setpLeft",
+    "right": "setpRight",
 }
 POSE_COMMANDS = {"up", "down", "tilt_left", "tilt_right", "level"}
 MOVE_COMMANDS = set(WALK_COMMANDS) | POSE_COMMANDS | {"stop"}
@@ -98,31 +99,9 @@ def get_dog():
     return dog
 
 
-def walk_cycle(control, reverse=False):
-    # Il passo Freenove di default alza poco le zampe e sembra uno strisciare.
-    # Y sotto "height" = zampa sollevata; alziamo di più il passo.
-    speed = 8
-    height = control.height
-    lift = 20
-    stride = 12
-    angles = range(450, 89, -speed) if reverse else range(90, 451, speed)
-    name = "backWard" if reverse else "forWard"
-    for angle in angles:
-        rad = angle * math.pi / 180
-        x1 = stride * math.cos(rad)
-        y1 = lift * math.sin(rad) + height
-        x2 = stride * math.cos(rad + math.pi)
-        y2 = lift * math.sin(rad + math.pi) + height
-        if y1 > height:
-            y1 = height
-        if y2 > height:
-            y2 = height
-        control.changeCoordinates(name, x1, y1, 0, x2, y2, 0)
-
-
 def apply_gait(direction):
     control = get_dog()
-    walk_cycle(control, reverse=(direction == "backward"))
+    getattr(control, WALK_COMMANDS[direction])()
 
 
 def apply_stop():
