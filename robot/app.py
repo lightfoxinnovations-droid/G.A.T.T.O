@@ -29,7 +29,12 @@ WALK_COMMANDS = {
     "right": "setpRight",
 }
 POSE_COMMANDS = {"up", "down", "tilt_left", "tilt_right", "level"}
-MOVE_COMMANDS = set(WALK_COMMANDS) | POSE_COMMANDS | {"stop"}
+HEAD_COMMANDS = {"head_up", "head_down", "head_left", "head_right", "head_center"}
+MOVE_COMMANDS = set(WALK_COMMANDS) | POSE_COMMANDS | HEAD_COMMANDS | {"stop"}
+HEAD_PITCH_MIN = -18
+HEAD_PITCH_MAX = 14
+HEAD_PITCH_STEP = 5
+HEAD_PAN_STEP = 14
 IMX_MODEL = "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk"
 IMX_LABELS = "/usr/share/rpi-camera-assets/imx500_mobilenet_ssd.json"
 PLANT_LABELS = {"potted plant", "vase", "potted_plant"}
@@ -73,6 +78,7 @@ camera_lock = threading.Lock()
 chat_lock = threading.Lock()
 height_offset = 0
 roll = 0
+look_pitch = 0
 patrol_active = False
 patrol_paused = False
 last_inspect_at = 0
@@ -89,6 +95,7 @@ PATROL = {
     "distance": 0,
     "message": "In attesa",
     "diagnosis": "",
+    "diagnosis_image": "",
     "eyes": "idle",
 }
 PLANT_PROMPT = (
@@ -494,8 +501,10 @@ def set_head(angle, settle=0.9):
 
 
 def set_look_down(pitch=LOOK_DOWN, settle=0.3):
+    global look_pitch
+    look_pitch = max(HEAD_PITCH_MIN, min(HEAD_PITCH_MAX, int(pitch)))
     try:
-        get_dog().attitude(0, max(-18, min(18, int(pitch))), 0)
+        get_dog().attitude(roll, look_pitch, 0)
         if settle > 0:
             time.sleep(settle)
     except Exception as error:
@@ -503,11 +512,35 @@ def set_look_down(pitch=LOOK_DOWN, settle=0.3):
 
 
 def reset_head_and_body():
+    global look_pitch
+    look_pitch = 0
     set_head(HEAD_CENTER, 0.2)
     try:
         get_dog().attitude(0, 0, 0)
     except Exception:
         pass
+
+
+def apply_head_step(direction):
+    global look_pitch
+    if direction == "head_up":
+        look_pitch = min(HEAD_PITCH_MAX, look_pitch + HEAD_PITCH_STEP)
+        apply_pose()
+        return
+    if direction == "head_down":
+        look_pitch = max(HEAD_PITCH_MIN, look_pitch - HEAD_PITCH_STEP)
+        apply_pose()
+        return
+    if direction == "head_left":
+        set_head(head_angle - HEAD_PAN_STEP, 0.08)
+        return
+    if direction == "head_right":
+        set_head(head_angle + HEAD_PAN_STEP, 0.08)
+        return
+    if direction == "head_center":
+        look_pitch = 0
+        set_head(HEAD_CENTER, 0.15)
+        apply_pose()
 
 
 def apply_gait(direction):
@@ -568,7 +601,7 @@ def apply_pose():
     height_offset = max(-28, min(24, height_offset))
     roll = max(-18, min(18, roll))
     control.upAndDown(height_offset)
-    control.attitude(roll, 0, 0)
+    control.attitude(roll, look_pitch, 0)
 
 
 def apply_pose_step(direction):
@@ -761,6 +794,7 @@ def inspect_plant(extra=""):
     try:
         diagnosis, photo = ask_vision(prompt)
         PATROL["diagnosis"] = diagnosis
+        PATROL["diagnosis_image"] = photo
         PATROL["message"] = "Pianta analizzata, continuo"
         add_chat("ai", diagnosis, action="inspect", image=photo)
     except Exception as error:
@@ -1167,6 +1201,12 @@ def move_robot():
     direction = str(data.get("direction") or "").strip().lower()
     if direction not in MOVE_COMMANDS:
         return jsonify({"status": "error", "message": "Direzione non valida."}), 400
+    if direction in HEAD_COMMANDS:
+        try:
+            apply_head_step(direction)
+        except Exception as error:
+            return jsonify({"status": "error", "message": str(error)}), 500
+        return jsonify({"status": "success", "direction": direction, "mode": robot_mode})
     with move_lock:
         move_direction = direction
     return jsonify({"status": "success", "direction": direction, "mode": robot_mode})
@@ -1302,8 +1342,14 @@ def analyze_plant():
     try:
         diagnosis, photo = ask_vision(plant_prompt())
         PATROL["diagnosis"] = diagnosis
+        PATROL["diagnosis_image"] = photo
         add_chat("ai", diagnosis, action="inspect", image=photo)
-        return jsonify({"status": "success", "diagnosis": diagnosis, "light": light_public()})
+        return jsonify({
+            "status": "success",
+            "diagnosis": diagnosis,
+            "image": photo,
+            "light": light_public(),
+        })
     except Exception as error:
         return jsonify({"status": "error", "message": str(error)}), 500
 

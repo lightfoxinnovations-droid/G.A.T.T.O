@@ -26,6 +26,7 @@ class RobotStatus {
     required this.patrolDistance,
     required this.patrolMessage,
     required this.patrolDiagnosis,
+    required this.patrolDiagnosisImage,
     required this.eyes,
     required this.tourRecording,
     required this.tourPlaying,
@@ -48,6 +49,7 @@ class RobotStatus {
   final int patrolDistance;
   final String patrolMessage;
   final String patrolDiagnosis;
+  final String patrolDiagnosisImage;
   final String eyes;
   final bool tourRecording;
   final bool tourPlaying;
@@ -75,6 +77,7 @@ class RobotStatus {
       patrolDistance: patrol['distance'] as int? ?? 0,
       patrolMessage: '${patrol['message'] ?? ''}',
       patrolDiagnosis: '${patrol['diagnosis'] ?? ''}',
+      patrolDiagnosisImage: '${patrol['diagnosis_image'] ?? ''}',
       eyes: '${patrol['eyes'] ?? ''}',
       tourRecording: tour['recording'] == true,
       tourPlaying: tour['playing'] == true,
@@ -85,6 +88,13 @@ class RobotStatus {
       lightLabel: '${light['label'] ?? 'Non collegato'}',
     );
   }
+}
+
+class AnalyzeResult {
+  const AnalyzeResult({required this.diagnosis, required this.image});
+
+  final String diagnosis;
+  final String image;
 }
 
 class ChatMessage {
@@ -362,11 +372,16 @@ class RobotApi {
     await http.post(_uri('/api/tour/clear')).timeout(const Duration(seconds: 6));
   }
 
-  Future<String> analyze() async {
+  Future<AnalyzeResult> analyze() async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
     final response = await http.get(_uri('/api/analyze')).timeout(const Duration(seconds: 60));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    if (data['status'] == 'success') return '${data['diagnosis']}';
+    if (data['status'] == 'success') {
+      return AnalyzeResult(
+        diagnosis: '${data['diagnosis']}',
+        image: '${data['image'] ?? ''}',
+      );
+    }
     throw Exception(data['message'] ?? 'Analisi non riuscita');
   }
 }

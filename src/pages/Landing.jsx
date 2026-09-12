@@ -84,7 +84,7 @@ function Landing() {
             Scarica l'app nativa, entra nella rete G.A.T.T.O. e scegli la Wi-Fi di casa. Poi da Controllo puoi guidarlo a mano.
           </p>
           <div className="download-actions">
-            <a className="store-btn android" href="/gatto.apk?v=10" download="gatto.apk">
+            <a className="store-btn android" href="/gatto.apk?v=12" download="gatto.apk">
               Scarica per Android
             </a>
             <button type="button" className="store-btn ios" disabled>

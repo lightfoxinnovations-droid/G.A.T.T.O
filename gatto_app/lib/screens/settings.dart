@@ -7,10 +7,11 @@ import '../robot.dart';
 import '../theme.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, required this.api, required this.onReset});
+  const SettingsPage({super.key, required this.api, required this.onReset, this.onBack});
 
   final RobotApi api;
   final VoidCallback onReset;
+  final VoidCallback? onBack;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -115,17 +116,20 @@ class _SettingsPageState extends State<SettingsPage> {
       await widget.api.forget();
     } catch (_) {}
     if (!mounted) return;
+    widget.onBack?.call();
     widget.onReset();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
+    final body = ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        const Text('IMPOSTAZIONI', style: TextStyle(color: gattoAmber, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
-        const SizedBox(height: 6),
-        const Text('Wi-Fi e robot', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: gattoGreenDark)),
+        if (widget.onBack == null) ...[
+          const Text('IMPOSTAZIONI', style: TextStyle(color: gattoAmber, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
+          const SizedBox(height: 6),
+          const Text('Wi-Fi e robot', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: gattoGreenDark)),
+        ],
         const SizedBox(height: 14),
         _card(
           child: Column(
@@ -225,6 +229,18 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Text(resetting ? 'Attendi...' : 'Riconfigura G.A.T.T.O.'),
         ),
       ],
+    );
+    if (widget.onBack == null) return body;
+    return Scaffold(
+      backgroundColor: gattoBg,
+      appBar: AppBar(
+        title: const Text('Impostazioni'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: widget.onBack,
+        ),
+      ),
+      body: body,
     );
   }
 

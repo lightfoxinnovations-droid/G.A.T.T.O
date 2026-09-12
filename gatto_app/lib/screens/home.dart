@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
@@ -15,16 +16,15 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  bool loading = false;
   bool patrolBusy = false;
   bool patrolActive = false;
   bool tourBusy = false;
   List<String> tourStops = [];
   String diagnosis = '';
+  String diagnosisImage = '';
   String patrolTitle = 'Fermo';
-  String patrolSubtitle = 'Pattugliamento';
   String lightValue = '—';
-  String lightHint = 'Non collegato';
+  String lightHint = 'In attesa';
   bool lightOk = false;
   Timer? _poll;
 
@@ -47,16 +47,16 @@ class _HomePageState extends State<HomePage> {
       if (!mounted || status == null) return;
       setState(() {
         patrolActive = status.driveMode == 'autonomous';
-        patrolSubtitle = 'Pattugliamento';
         if (status.driveMode == 'autonomous' && status.patrolRunning) {
-          patrolTitle = status.patrolMessage.isEmpty ? 'L\'IA sta guidando' : status.patrolMessage;
+          patrolTitle = status.patrolMessage.isEmpty ? 'Sta pattugliando' : status.patrolMessage;
         } else if (status.driveMode == 'autonomous') {
           patrolTitle = 'Autonomo, in attesa';
         } else {
           patrolTitle = 'Fermo';
         }
-        if (!loading && status.patrolDiagnosis.isNotEmpty) {
+        if (status.patrolDiagnosis.isNotEmpty) {
           diagnosis = status.patrolDiagnosis;
+          diagnosisImage = status.patrolDiagnosisImage;
         }
         tourStops = status.tourStops;
         lightOk = status.lightOk;
@@ -65,13 +65,27 @@ class _HomePageState extends State<HomePage> {
           lightHint = status.lightLabel;
         } else {
           lightValue = '—';
-          lightHint = status.lightLabel.isEmpty ? 'Non collegato' : status.lightLabel;
+          lightHint = status.lightLabel.isEmpty ? 'In attesa' : status.lightLabel;
         }
       });
     } catch (_) {}
   }
 
   Future<void> _togglePatrol() async {
+    if (!patrolActive) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Avviare la pattuglia?'),
+          content: const Text('Gatto inizierà a camminare da solo e a guardare intorno.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annulla')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Avvia')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
     setState(() => patrolBusy = true);
     try {
       await widget.api.setDriveMode(patrolActive ? 'manual' : 'autonomous');
@@ -89,41 +103,23 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() => tourBusy = false);
   }
 
-  Future<void> _scan() async {
-    setState(() {
-      loading = true;
-      diagnosis = 'Scansione in corso...';
-    });
-    try {
-      final text = await widget.api.analyze();
-      if (!mounted) return;
-      setState(() {
-        diagnosis = text;
-        loading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        diagnosis = '$error';
-        loading = false;
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final sensors = [
-      ('Umidità terreno', '—', 'Non collegato', false),
+      ('Umidità terreno', '—', 'In arrivo', false),
       ('Luce', lightValue, lightHint, lightOk),
-      ('Temperatura', '—', 'Non collegato', false),
-      ('Batteria', '—', 'Non collegato', false),
+      ('Temperatura', '—', 'In arrivo', false),
+      ('Batteria', '—', 'In arrivo', false),
     ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        const Text('OGGI', style: TextStyle(color: gattoAmber, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
+        const Text('CASA', style: TextStyle(color: gattoAmber, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
         const SizedBox(height: 6),
-        const Text('Il tuo orto è sotto controllo', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: gattoGreenDark)),
+        Text(
+          patrolActive ? 'Gatto è in movimento' : 'Gatto è fermo',
+          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: gattoGreenDark),
+        ),
         const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.all(16),
@@ -137,7 +133,7 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(patrolSubtitle, style: const TextStyle(color: Colors.white70)),
+                    const Text('Pattuglia', style: TextStyle(color: Colors.white70)),
                     const SizedBox(height: 4),
                     Text(patrolTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
                   ],
@@ -147,46 +143,30 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-        const SizedBox(height: 20),
-        const Text('AZIONI', style: TextStyle(color: gattoAmber, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _actionTile(
-                icon: patrolActive ? Icons.pause_circle_outline : Icons.play_circle_outline,
-                label: patrolBusy
-                    ? 'Attendi...'
-                    : patrolActive
-                        ? 'Ferma pattuglia'
-                        : 'Avvia pattuglia',
-                onTap: patrolBusy ? null : _togglePatrol,
-                active: patrolActive,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _actionTile(
-                icon: Icons.document_scanner_outlined,
-                label: loading ? 'Analisi...' : 'Avvia scansione',
-                onTap: loading ? null : _scan,
-                active: loading,
-              ),
-            ),
-          ],
+        const SizedBox(height: 16),
+        _actionTile(
+          icon: patrolActive ? Icons.pause_circle_outline : Icons.play_circle_outline,
+          label: patrolBusy
+              ? 'Attendi...'
+              : patrolActive
+                  ? 'Ferma pattuglia'
+                  : 'Avvia pattuglia',
+          onTap: patrolBusy ? null : _togglePatrol,
+          active: patrolActive,
+          wide: true,
         ),
         if (tourStops.isNotEmpty) ...[
           const SizedBox(height: 10),
           _actionTile(
             icon: Icons.replay,
-            label: tourBusy ? 'Attendi...' : 'Ripeti giro (${tourStops.length})',
+            label: tourBusy ? 'Attendi...' : 'Ripeti percorso (${tourStops.length})',
             onTap: tourBusy ? null : _playTour,
             wide: true,
           ),
         ],
         if (diagnosis.isNotEmpty) ...[
           const SizedBox(height: 14),
-          _tile('Ultima diagnosi', diagnosis),
+          _diagnosisCard(),
         ],
         const SizedBox(height: 22),
         const Text('SENSORI', style: TextStyle(color: gattoAmber, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
@@ -219,7 +199,7 @@ class _HomePageState extends State<HomePage> {
                     Text(
                       item.$3,
                       style: TextStyle(
-                        color: item.$4 ? gattoGreen : const Color(0xFFD97706),
+                        color: item.$4 ? gattoGreen : const Color(0xFF9CA3AF),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -229,6 +209,43 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _diagnosisCard() {
+    Widget? photo;
+    if (diagnosisImage.isNotEmpty) {
+      try {
+        photo = ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(
+            base64Decode(diagnosisImage),
+            width: double.infinity,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+          ),
+        );
+      } catch (_) {}
+    }
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFDCFCE7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Ultima diagnosi', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+          if (photo != null) ...[
+            const SizedBox(height: 10),
+            photo,
+          ],
+          const SizedBox(height: 8),
+          Text(diagnosis, style: const TextStyle(color: Color(0xFF4B5563), height: 1.45)),
+        ],
+      ),
     );
   }
 
@@ -247,65 +264,29 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.circular(18),
         child: Container(
           width: wide ? double.infinity : null,
-          height: wide ? 64 : 112,
+          height: 64,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: active ? gattoGreen : const Color(0xFFDCFCE7)),
           ),
-          child: wide
-              ? Row(
-                  children: [
-                    Icon(icon, color: active ? Colors.white : gattoGreenDark, size: 26),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
-                          color: active ? Colors.white : gattoGreenDark,
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Icon(icon, color: active ? Colors.white : gattoGreenDark, size: 28),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                        height: 1.2,
-                        color: active ? Colors.white : gattoGreenDark,
-                      ),
-                    ),
-                  ],
+          child: Row(
+            children: [
+              Icon(icon, color: active ? Colors.white : gattoGreenDark, size: 26),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    color: active ? Colors.white : gattoGreenDark,
+                  ),
                 ),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _tile(String title, String body) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFDCFCE7)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
-          const SizedBox(height: 8),
-          Text(body, style: const TextStyle(color: Color(0xFF4B5563), height: 1.45)),
-        ],
       ),
     );
   }

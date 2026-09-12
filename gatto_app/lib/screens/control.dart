@@ -23,6 +23,9 @@ class _ControlPageState extends State<ControlPage> {
   String lightText = '';
   bool patrolRunning = false;
   bool sending = false;
+  bool scanning = false;
+  String diagnosis = '';
+  String diagnosisImage = '';
   bool tourRecording = false;
   bool tourPlaying = false;
   List<String> tourStops = [];
@@ -37,6 +40,7 @@ class _ControlPageState extends State<ControlPage> {
   @override
   void initState() {
     super.initState();
+    _watchLive();
     _syncFromRobot();
   }
 
@@ -49,15 +53,18 @@ class _ControlPageState extends State<ControlPage> {
     super.dispose();
   }
 
-  void _watchPatrol(bool enabled) {
-    _poll?.cancel();
+  void _watchLive() {
     _live?.cancel();
-    if (!enabled) return;
-    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _syncFromRobot());
     _live = Timer.periodic(const Duration(milliseconds: 700), (_) {
       if (!mounted) return;
       setState(() => cameraTick += 1);
     });
+  }
+
+  void _watchPatrol(bool enabled) {
+    _poll?.cancel();
+    if (!enabled) return;
+    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _syncFromRobot());
   }
 
   Future<void> _syncFromRobot() async {
@@ -75,6 +82,10 @@ class _ControlPageState extends State<ControlPage> {
         lightText = status.lightOk && status.lightLux != null
             ? '${status.lightLux} lx · ${status.lightLabel}'
             : '';
+        if (!scanning && status.patrolDiagnosis.isNotEmpty) {
+          diagnosis = status.patrolDiagnosis;
+          diagnosisImage = status.patrolDiagnosisImage;
+        }
       });
       if (autonomous) {
         if (_poll == null) _watchPatrol(true);
@@ -110,6 +121,20 @@ class _ControlPageState extends State<ControlPage> {
   }
 
   Future<void> _setMode(bool nextAutonomous) async {
+    if (nextAutonomous && !autonomous) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Avviare la pattuglia?'),
+          content: const Text('Gatto inizierà a camminare da solo e a guardare intorno.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annulla')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Avvia')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
     setState(() {
       autonomous = nextAutonomous;
       error = null;
@@ -159,6 +184,50 @@ class _ControlPageState extends State<ControlPage> {
     } catch (_) {}
   }
 
+  Future<void> _scanPlant() async {
+    setState(() {
+      scanning = true;
+      diagnosis = 'Scansione in corso...';
+      error = null;
+    });
+    try {
+      final result = await widget.api.analyze();
+      if (!mounted) return;
+      setState(() {
+        diagnosis = result.diagnosis;
+        diagnosisImage = result.image;
+        scanning = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        diagnosis = '$err';
+        scanning = false;
+      });
+    }
+  }
+
+  Widget _headPad() {
+    return Column(
+      children: [
+        _cell(Icons.keyboard_arrow_up, 'head_up', label: 'Su', hold: false, compact: true, outlined: true),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _cell(Icons.keyboard_arrow_left, 'head_left', label: 'Sinistra', hold: false, compact: true, outlined: true),
+            const SizedBox(width: 8),
+            _cell(Icons.center_focus_strong, 'head_center', label: 'Centro', hold: false, compact: true, outlined: true),
+            const SizedBox(width: 8),
+            _cell(Icons.keyboard_arrow_right, 'head_right', label: 'Destra', hold: false, compact: true, outlined: true),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _cell(Icons.keyboard_arrow_down, 'head_down', label: 'Giù', hold: false, compact: true, outlined: true),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (autonomous) {
@@ -167,19 +236,8 @@ class _ControlPageState extends State<ControlPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('MOVIMENTO', style: TextStyle(color: gattoAmber, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
-            const SizedBox(height: 6),
-            const Text('Gestione del robot', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: gattoGreenDark)),
-            const SizedBox(height: 14),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: true, label: Text('Autonomo')),
-                ButtonSegment(value: false, label: Text('Manuale')),
-              ],
-              selected: {autonomous},
-              onSelectionChanged: (value) => _setMode(value.first),
-            ),
-            const SizedBox(height: 12),
+            _modeSwitch(),
+            const SizedBox(height: 8),
             Text(
               [
                 if (patrolRunning)
@@ -192,11 +250,11 @@ class _ControlPageState extends State<ControlPage> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Color(0xFF4B5563)),
             ),
-            const SizedBox(height: 10),
-            _liveView(),
             const SizedBox(height: 8),
+            _liveView(height: 168),
+            const SizedBox(height: 6),
             _tourBar(),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Expanded(child: _chat()),
             const SizedBox(height: 8),
             _composer(),
@@ -208,58 +266,61 @@ class _ControlPageState extends State<ControlPage> {
         ),
       );
     }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      children: [
-        const Text('MOVIMENTO', style: TextStyle(color: gattoAmber, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
-        const SizedBox(height: 6),
-        const Text('Gestione del robot', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: gattoGreenDark)),
-        const SizedBox(height: 14),
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(value: true, label: Text('Autonomo')),
-            ButtonSegment(value: false, label: Text('Manuale')),
-          ],
-          selected: {autonomous},
-          onSelectionChanged: (value) => _setMode(value.first),
-        ),
-        const SizedBox(height: 16),
-        _tourBar(),
-        const SizedBox(height: 16),
-        const Text('Cammina', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
-        const SizedBox(height: 6),
-        const Text('Tieni premuto per muoverlo. Lascia per fermarlo.', style: TextStyle(color: Color(0xFF6B7280))),
-        const SizedBox(height: 14),
-        _pad(),
-        const SizedBox(height: 22),
-        const Text('Inclinati', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _cell(Icons.rotate_90_degrees_ccw, 'tilt_left', label: 'Sx'),
-            const SizedBox(width: 12),
-            _cell(Icons.horizontal_rule, 'level', label: 'Dritto', hold: false),
-            const SizedBox(width: 12),
-            _cell(Icons.rotate_90_degrees_cw, 'tilt_right', label: 'Dx'),
-          ],
-        ),
-        const SizedBox(height: 22),
-        const Text('Altezza', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _cell(Icons.arrow_downward, 'down', label: 'Abbassa'),
-            const SizedBox(width: 12),
-            _cell(Icons.arrow_upward, 'up', label: 'Alza'),
-          ],
-        ),
-        if (error != null) ...[
-          const SizedBox(height: 12),
-          Text(error!, style: const TextStyle(color: Color(0xFFB91C1C))),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _modeSwitch(),
+          const SizedBox(height: 10),
+          _liveView(height: 176),
+          const SizedBox(height: 10),
+          FilledButton(
+            onPressed: scanning ? null : _scanPlant,
+            child: Text(scanning ? 'Analisi in corso, attendi...' : 'Scansiona pianta'),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: ListView(
+              children: [
+                if (diagnosis.isNotEmpty) ...[
+                  _diagnosisBox(),
+                  const SizedBox(height: 16),
+                ],
+                const Text('Testa', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+                const SizedBox(height: 4),
+                const Text('Un tocco per inquadrare. La camera resta qui sopra.', style: TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
+                const SizedBox(height: 10),
+                _headPad(),
+                const SizedBox(height: 18),
+                const Text('Cammina', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+                const SizedBox(height: 4),
+                const Text('Tieni premuto. Lascia per fermarlo.', style: TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
+                const SizedBox(height: 10),
+                _pad(),
+                const SizedBox(height: 8),
+                _tourBar(),
+                _poseBar(),
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(error!, style: const TextStyle(color: Color(0xFFB91C1C))),
+                ],
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _modeSwitch() {
+    return SegmentedButton<bool>(
+      segments: const [
+        ButtonSegment(value: true, label: Text('Autonomo')),
+        ButtonSegment(value: false, label: Text('Manuale')),
       ],
+      selected: {autonomous},
+      onSelectionChanged: (value) => _setMode(value.first),
     );
   }
 
@@ -322,50 +383,133 @@ class _ControlPageState extends State<ControlPage> {
     }
   }
 
-  Widget _liveView() {
+  Widget _liveView({double? height}) {
     if (widget.api.host == null) {
       return const SizedBox.shrink();
     }
+    final image = Image.network(
+      widget.api.cameraUrl(cameraTick),
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: height,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stack) => Container(
+        color: const Color(0xFFDCFCE7),
+        alignment: Alignment.center,
+        child: const Text('Camera in avvio...', style: TextStyle(color: Color(0xFF6B7280))),
+      ),
+    );
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
-      child: AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Image.network(
-          widget.api.cameraUrl(cameraTick),
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-          errorBuilder: (context, error, stack) => Container(
-            color: const Color(0xFFDCFCE7),
-            alignment: Alignment.center,
-            child: const Text('Camera in avvio...', style: TextStyle(color: Color(0xFF6B7280))),
+      child: height == null
+          ? AspectRatio(aspectRatio: 16 / 9, child: image)
+          : SizedBox(height: height, width: double.infinity, child: image),
+    );
+  }
+
+  Widget _diagnosisBox() {
+    Widget? photo;
+    if (diagnosisImage.isNotEmpty) {
+      try {
+        photo = ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(
+            base64Decode(diagnosisImage),
+            width: double.infinity,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
           ),
-        ),
+        );
+      } catch (_) {}
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFDCFCE7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Ultima diagnosi', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+          if (photo != null) ...[
+            const SizedBox(height: 10),
+            photo,
+          ],
+          const SizedBox(height: 8),
+          Text(diagnosis, style: const TextStyle(color: Color(0xFF4B5563), height: 1.45)),
+        ],
       ),
     );
   }
 
   Widget _tourBar() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _smallBtn(tourRecording ? 'Stop insegna' : 'Insegna giro', _toggleRecord),
-            _smallBtn('Salva fermata', _saveStop),
-            _smallBtn('Ripeti giro', _playTour),
-            _smallBtn('Cancella', _clearTour),
-          ],
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 8),
+        title: const Text('Giro dell\'orto', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+        subtitle: Text(
+          tourStops.isEmpty
+              ? 'Insegna un percorso da ripetere'
+              : tourPlaying
+                  ? 'Ripeto: ${tourStops.join(' → ')}'
+                  : 'Fermate: ${tourStops.join(' → ')}',
+          style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
         ),
-        if (tourStops.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          Text(
-            tourPlaying ? 'Ripeto: ${tourStops.join(' → ')}' : 'Fermate: ${tourStops.join(' → ')}',
-            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _smallBtn(tourRecording ? 'Stop' : 'Insegna il percorso', _toggleRecord),
+                _smallBtn('Salva fermata', _saveStop),
+                _smallBtn('Ripeti', _playTour),
+                _smallBtn('Cancella', _clearTour),
+              ],
+            ),
           ),
         ],
-      ],
+      ),
+    );
+  }
+
+  Widget _poseBar() {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        title: const Text('Posa', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+        subtitle: const Text('Inclinazione e altezza del corpo', style: TextStyle(color: Color(0xFF6B7280), fontSize: 12)),
+        children: [
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _cell(Icons.rotate_90_degrees_ccw, 'tilt_left', label: 'Sinistra', compact: true),
+              const SizedBox(width: 10),
+              _cell(Icons.horizontal_rule, 'level', label: 'Dritto', hold: false, compact: true),
+              const SizedBox(width: 10),
+              _cell(Icons.rotate_90_degrees_cw, 'tilt_right', label: 'Destra', compact: true),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _cell(Icons.arrow_downward, 'down', label: 'Abbassa', compact: true),
+              const SizedBox(width: 12),
+              _cell(Icons.arrow_upward, 'up', label: 'Alza', compact: true),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 
@@ -519,36 +663,59 @@ class _ControlPageState extends State<ControlPage> {
   Widget _pad() {
     return Column(
       children: [
-        _cell(Icons.keyboard_arrow_up, 'forward'),
-        const SizedBox(height: 10),
+        _cell(Icons.keyboard_arrow_up, 'forward', label: 'Avanti'),
+        const SizedBox(height: 8),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _cell(Icons.keyboard_arrow_left, 'left'),
+            _cell(Icons.keyboard_arrow_left, 'left', label: 'Sinistra'),
             const SizedBox(width: 10),
-            _cell(Icons.stop, 'stop', color: const Color(0xFFEF4444)),
+            _cell(Icons.stop, 'stop', color: const Color(0xFFEF4444), label: 'Stop'),
             const SizedBox(width: 10),
-            _cell(Icons.keyboard_arrow_right, 'right'),
+            _cell(Icons.keyboard_arrow_right, 'right', label: 'Destra'),
           ],
         ),
-        const SizedBox(height: 10),
-        _cell(Icons.keyboard_arrow_down, 'backward'),
+        const SizedBox(height: 8),
+        _cell(Icons.keyboard_arrow_down, 'backward', label: 'Indietro'),
       ],
     );
   }
 
-  Widget _cell(IconData icon, String direction, {Color? color, String? label, bool hold = true}) {
+  Widget _cell(
+    IconData icon,
+    String direction, {
+    Color? color,
+    String? label,
+    bool hold = true,
+    bool compact = false,
+    bool outlined = false,
+  }) {
+    final width = compact ? 64.0 : 80.0;
+    final height = compact ? 52.0 : 68.0;
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(16));
     final button = SizedBox(
-      width: 72,
-      height: 64,
-      child: FilledButton(
-        onPressed: hold ? () {} : () => _hold(direction),
-        style: FilledButton.styleFrom(
-          backgroundColor: color ?? gattoGreen,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        ),
-        child: Icon(icon),
-      ),
+      width: width,
+      height: height,
+      child: outlined
+          ? OutlinedButton(
+              onPressed: hold ? () {} : () => _hold(direction),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: gattoGreenDark,
+                side: const BorderSide(color: Color(0xFF86EFAC), width: 1.5),
+                shape: shape,
+                padding: EdgeInsets.zero,
+              ),
+              child: Icon(icon, size: compact ? 22 : 26),
+            )
+          : FilledButton(
+              onPressed: hold ? () {} : () => _hold(direction),
+              style: FilledButton.styleFrom(
+                backgroundColor: color ?? gattoGreen,
+                shape: shape,
+                padding: EdgeInsets.zero,
+              ),
+              child: Icon(icon, size: compact ? 22 : 28),
+            ),
     );
     final body = hold
         ? Listener(

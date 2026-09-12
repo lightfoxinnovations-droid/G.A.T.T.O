@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../robot.dart';
@@ -19,15 +21,73 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int tab = 0;
+  bool linked = false;
+  String linkLabel = 'In cerca...';
+  Timer? _poll;
+  late final List<Widget> pages;
 
   @override
-  Widget build(BuildContext context) {
-    final pages = [
+  void initState() {
+    super.initState();
+    pages = [
       HomePage(api: widget.api),
-      SettingsPage(api: widget.api, onReset: widget.onReset),
       ControlPage(api: widget.api),
       HistoryPage(api: widget.api),
     ];
+    _ping();
+    _poll = Timer.periodic(const Duration(seconds: 4), (_) => _ping());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _ping() async {
+    try {
+      final status = await widget.api.status();
+      if (!mounted) return;
+      if (status == null) {
+        setState(() {
+          linked = false;
+          linkLabel = 'Senza rete';
+        });
+        return;
+      }
+      setState(() {
+        linked = true;
+        if (status.homeSsid.isNotEmpty && status.internet) {
+          linkLabel = 'Collegato · ${status.homeSsid}';
+        } else if (status.internet) {
+          linkLabel = 'Collegato';
+        } else {
+          linkLabel = 'Collegato, senza internet';
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        linked = false;
+        linkLabel = 'Senza rete';
+      });
+    }
+  }
+
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => SettingsPage(
+          api: widget.api,
+          onReset: widget.onReset,
+          onBack: () => Navigator.of(context).pop(),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: gattoBg,
       body: SafeArea(
@@ -42,24 +102,33 @@ class _AppShellState extends State<AppShell> {
                     child: Image.asset('assets/logo.png', width: 40, height: 40, fit: BoxFit.cover),
                   ),
                   const SizedBox(width: 10),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('G.A.T.T.O.', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
-                        Text('Collegato', style: TextStyle(color: Color(0xFF6B7280), fontSize: 12)),
+                        const Text('G.A.T.T.O.', style: TextStyle(fontWeight: FontWeight.w800, color: gattoGreenDark)),
+                        Text(
+                          linkLabel,
+                          style: TextStyle(
+                            color: linked ? gattoGreen : const Color(0xFFD97706),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                   IconButton(
                     tooltip: 'Impostazioni',
-                    onPressed: () => setState(() => tab = 1),
+                    onPressed: _openSettings,
                     icon: const Icon(Icons.settings_outlined, color: gattoGreenDark),
                   ),
                 ],
               ),
             ),
-            Expanded(child: pages[tab]),
+            Expanded(
+              child: IndexedStack(index: tab, children: pages),
+            ),
           ],
         ),
       ),
@@ -68,9 +137,8 @@ class _AppShellState extends State<AppShell> {
         onDestinationSelected: (index) => setState(() => tab = index),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Impostazioni'),
           NavigationDestination(icon: Icon(Icons.sports_esports_outlined), selectedIcon: Icon(Icons.sports_esports), label: 'Controllo'),
-          NavigationDestination(icon: Icon(Icons.history), label: 'Storico'),
+          NavigationDestination(icon: Icon(Icons.history), selectedIcon: Icon(Icons.history), label: 'Storico'),
         ],
       ),
     );
