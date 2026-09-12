@@ -125,6 +125,10 @@ BH1750_POWER_ON = 0x01
 BH1750_CONT_HRES = 0x10
 light_lock = threading.Lock()
 LIGHT = {"lux": None, "ok": False, "ts": 0, "ready": False, "addr": 0x23, "bus": 8}
+ADS7830_ADDR = 0x48
+ADS7830_CMD = 0x84
+battery_lock = threading.Lock()
+BATTERY = {"volts": None, "ok": False, "ts": 0}
 
 
 def run(cmd, timeout=40):
@@ -239,6 +243,78 @@ def light_public():
         return {"ok": False, "lux": None, "label": "Non collegato"}
     lux = int(round(data["lux"]))
     return {"ok": True, "lux": lux, "label": light_label(data["lux"])}
+
+
+def ads7830_read(bus, channel):
+    command = ADS7830_CMD | ((((channel << 2) | (channel >> 1)) & 0x07) << 4)
+    bus.write_byte(ADS7830_ADDR, command)
+    return bus.read_byte(ADS7830_ADDR)
+
+
+def read_battery():
+    with battery_lock:
+        now = time.time()
+        if BATTERY["ok"] and now - BATTERY["ts"] < 0.8:
+            return dict(BATTERY)
+        bus = None
+        try:
+            if not os.path.exists("/dev/i2c-1"):
+                raise RuntimeError("i2c-1 assente")
+            SMBus = _smbus()
+            bus = SMBus(1)
+            samples = []
+            for _ in range(5):
+                samples.append(ads7830_read(bus, 0))
+                time.sleep(0.004)
+            bus.close()
+            bus = None
+            samples.sort()
+            raw = samples[2]
+            volts = raw / 255.0 * 5.0 * 3
+            if volts < 4.8 or volts > 9.6:
+                raise RuntimeError(f"tensione non valida: {volts:.2f}")
+            BATTERY.update(volts=round(volts, 2), ok=True, ts=now)
+            return dict(BATTERY)
+        except Exception as error:
+            if bus is not None:
+                try:
+                    bus.close()
+                except Exception:
+                    pass
+            was_ok = BATTERY["ok"]
+            BATTERY.update(volts=None, ok=False, ts=now)
+            if was_ok:
+                print("batteria:", error)
+            return dict(BATTERY)
+
+
+def battery_percent(volts):
+    return max(0, min(100, int(round((volts - 6.4) / (8.4 - 6.4) * 100))))
+
+
+def battery_label(percent):
+    if percent >= 70:
+        return "Carica"
+    if percent >= 40:
+        return "Buona"
+    if percent >= 20:
+        return "Media"
+    if percent >= 8:
+        return "Bassa"
+    return "Scarica"
+
+
+def battery_public():
+    data = read_battery()
+    if not data["ok"] or data["volts"] is None:
+        return {"ok": False, "volts": None, "percent": None, "label": "Non collegato"}
+    percent = battery_percent(data["volts"])
+    return {
+        "ok": True,
+        "volts": data["volts"],
+        "percent": percent,
+        "label": battery_label(percent),
+    }
 
 
 def light_context():
@@ -1491,6 +1567,7 @@ def robot_status():
         "tour": tour_public(),
         "connect": CONNECT_STATE,
         "light": light_public(),
+        "battery": battery_public(),
         "alerts": {
             "latest_id": ALERT_ID,
             "count": len(ALERTS),

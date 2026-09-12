@@ -35,6 +35,10 @@ class RobotStatus {
     required this.lightOk,
     required this.lightLux,
     required this.lightLabel,
+    required this.batteryOk,
+    required this.batteryVolts,
+    required this.batteryPercent,
+    required this.batteryLabel,
     required this.alertsLatestId,
     required this.alertsCount,
     required this.pushServer,
@@ -62,6 +66,10 @@ class RobotStatus {
   final bool lightOk;
   final int? lightLux;
   final String lightLabel;
+  final bool batteryOk;
+  final double? batteryVolts;
+  final int? batteryPercent;
+  final String batteryLabel;
   final int alertsLatestId;
   final int alertsCount;
   final String pushServer;
@@ -72,6 +80,7 @@ class RobotStatus {
     final patrol = (json['patrol'] as Map?) ?? {};
     final tour = (json['tour'] as Map?) ?? {};
     final light = (json['light'] as Map?) ?? {};
+    final battery = (json['battery'] as Map?) ?? {};
     final alerts = (json['alerts'] as Map?) ?? {};
     final push = (json['push'] as Map?) ?? {};
     return RobotStatus(
@@ -96,6 +105,10 @@ class RobotStatus {
       lightOk: light['ok'] == true,
       lightLux: light['lux'] is num ? (light['lux'] as num).round() : null,
       lightLabel: '${light['label'] ?? 'Non collegato'}',
+      batteryOk: battery['ok'] == true,
+      batteryVolts: battery['volts'] is num ? (battery['volts'] as num).toDouble() : null,
+      batteryPercent: battery['percent'] is num ? (battery['percent'] as num).round() : null,
+      batteryLabel: '${battery['label'] ?? 'Non collegato'}',
       alertsLatestId: alerts['latest_id'] as int? ?? 0,
       alertsCount: alerts['count'] as int? ?? 0,
       pushServer: '${push['server'] ?? 'https://ntfy.sh'}',

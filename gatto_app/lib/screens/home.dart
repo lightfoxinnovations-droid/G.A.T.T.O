@@ -26,6 +26,9 @@ class _HomePageState extends State<HomePage> {
   String lightValue = '—';
   String lightHint = 'In attesa';
   bool lightOk = false;
+  String batteryValue = '—';
+  String batteryHint = 'In attesa';
+  bool batteryOk = false;
   Timer? _poll;
 
   @override
@@ -66,6 +69,16 @@ class _HomePageState extends State<HomePage> {
         } else {
           lightValue = '—';
           lightHint = status.lightLabel.isEmpty ? 'In attesa' : status.lightLabel;
+        }
+        batteryOk = status.batteryOk;
+        if (status.batteryOk && status.batteryPercent != null) {
+          batteryValue = '${status.batteryPercent}%';
+          final volts = status.batteryVolts;
+          final voltText = volts == null ? '' : '${volts.toStringAsFixed(1).replaceAll('.', ',')} V · ';
+          batteryHint = '$voltText${status.batteryLabel}';
+        } else {
+          batteryValue = '—';
+          batteryHint = status.batteryLabel.isEmpty ? 'In attesa' : status.batteryLabel;
         }
       });
     } catch (_) {}
@@ -109,7 +122,7 @@ class _HomePageState extends State<HomePage> {
       ('Umidità terreno', '—', 'In arrivo', false),
       ('Luce', lightValue, lightHint, lightOk),
       ('Temperatura', '—', 'In arrivo', false),
-      ('Batteria', '—', 'In arrivo', false),
+      ('Batteria', batteryValue, batteryHint, batteryOk),
     ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
