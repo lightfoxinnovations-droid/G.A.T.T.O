@@ -26,6 +26,11 @@ class RobotStatus {
     required this.patrolDistance,
     required this.patrolMessage,
     required this.patrolDiagnosis,
+    required this.eyes,
+    required this.tourRecording,
+    required this.tourPlaying,
+    required this.tourPaused,
+    required this.tourStops,
   });
 
   final bool ok;
@@ -40,10 +45,16 @@ class RobotStatus {
   final int patrolDistance;
   final String patrolMessage;
   final String patrolDiagnosis;
+  final String eyes;
+  final bool tourRecording;
+  final bool tourPlaying;
+  final bool tourPaused;
+  final List<String> tourStops;
 
   factory RobotStatus.fromJson(Map<String, dynamic> json) {
     final connect = (json['connect'] as Map?) ?? {};
     final patrol = (json['patrol'] as Map?) ?? {};
+    final tour = (json['tour'] as Map?) ?? {};
     return RobotStatus(
       ok: json['status'] == 'success',
       configured: json['configured'] == true,
@@ -57,6 +68,40 @@ class RobotStatus {
       patrolDistance: patrol['distance'] as int? ?? 0,
       patrolMessage: '${patrol['message'] ?? ''}',
       patrolDiagnosis: '${patrol['diagnosis'] ?? ''}',
+      eyes: '${patrol['eyes'] ?? ''}',
+      tourRecording: tour['recording'] == true,
+      tourPlaying: tour['playing'] == true,
+      tourPaused: tour['paused'] == true,
+      tourStops: ((tour['stops'] as List?) ?? []).map((item) => '$item').toList(),
+    );
+  }
+}
+
+class ChatMessage {
+  const ChatMessage({
+    required this.id,
+    required this.role,
+    required this.text,
+    required this.action,
+    required this.image,
+    required this.ts,
+  });
+
+  final int id;
+  final String role;
+  final String text;
+  final String action;
+  final String image;
+  final int ts;
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    return ChatMessage(
+      id: json['id'] as int? ?? 0,
+      role: '${json['role'] ?? 'system'}',
+      text: '${json['text'] ?? ''}',
+      action: '${json['action'] ?? ''}',
+      image: '${json['image'] ?? ''}',
+      ts: json['ts'] as int? ?? 0,
     );
   }
 }
@@ -233,6 +278,78 @@ class RobotApi {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       throw Exception(data['message'] ?? 'Movimento non inviato.');
     }
+  }
+
+  Future<List<ChatMessage>> patrolChat({int after = 0}) async {
+    if (host == null) return [];
+    final response = await http
+        .get(_uri('/api/patrol/chat?after=$after'))
+        .timeout(const Duration(seconds: 8));
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = (data['messages'] as List?) ?? [];
+    return items
+        .whereType<Map>()
+        .map((item) => ChatMessage.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<void> sendPatrolMessage(String message) async {
+    if (host == null) throw Exception('Collega prima G.A.T.T.O.');
+    final response = await http
+        .post(
+          _uri('/api/patrol/say'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'message': message}),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (response.statusCode >= 400) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(data['message'] ?? 'Messaggio non inviato.');
+    }
+  }
+
+  String cameraUrl([int tick = 0]) => 'http://$host/api/camera.jpg?t=$tick';
+
+  Future<void> tourRecord(bool enabled) async {
+    if (host == null) throw Exception('Collega prima G.A.T.T.O.');
+    final response = await http
+        .post(
+          _uri('/api/tour/record'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'enabled': enabled}),
+        )
+        .timeout(const Duration(seconds: 6));
+    if (response.statusCode >= 400) {
+      throw Exception('Registrazione non avviata.');
+    }
+  }
+
+  Future<void> tourSave(String name) async {
+    if (host == null) throw Exception('Collega prima G.A.T.T.O.');
+    final response = await http
+        .post(
+          _uri('/api/tour/save'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'name': name}),
+        )
+        .timeout(const Duration(seconds: 6));
+    if (response.statusCode >= 400) {
+      throw Exception('Fermata non salvata.');
+    }
+  }
+
+  Future<void> tourPlay() async {
+    if (host == null) throw Exception('Collega prima G.A.T.T.O.');
+    final response = await http.post(_uri('/api/tour/play')).timeout(const Duration(seconds: 6));
+    if (response.statusCode >= 400) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(data['message'] ?? 'Giro non avviato.');
+    }
+  }
+
+  Future<void> tourClear() async {
+    if (host == null) return;
+    await http.post(_uri('/api/tour/clear')).timeout(const Duration(seconds: 6));
   }
 
   Future<String> analyze() async {

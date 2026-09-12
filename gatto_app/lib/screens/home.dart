@@ -18,6 +18,8 @@ class _HomePageState extends State<HomePage> {
   bool loading = false;
   bool patrolBusy = false;
   bool patrolActive = false;
+  bool tourBusy = false;
+  List<String> tourStops = [];
   String diagnosis = '';
   String patrolTitle = 'Fermo';
   String patrolSubtitle = 'Pattugliamento';
@@ -53,6 +55,7 @@ class _HomePageState extends State<HomePage> {
         if (!loading && status.patrolDiagnosis.isNotEmpty) {
           diagnosis = status.patrolDiagnosis;
         }
+        tourStops = status.tourStops;
       });
     } catch (_) {}
   }
@@ -64,6 +67,15 @@ class _HomePageState extends State<HomePage> {
       await _loadPatrol();
     } catch (_) {}
     if (mounted) setState(() => patrolBusy = false);
+  }
+
+  Future<void> _playTour() async {
+    setState(() => tourBusy = true);
+    try {
+      await widget.api.tourPlay();
+      await _loadPatrol();
+    } catch (_) {}
+    if (mounted) setState(() => tourBusy = false);
   }
 
   Future<void> _scan() async {
@@ -129,6 +141,13 @@ class _HomePageState extends State<HomePage> {
                     : 'Avvia pattuglia',
           ),
         ),
+        if (tourStops.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          FilledButton(
+            onPressed: tourBusy ? null : _playTour,
+            child: Text(tourBusy ? 'Attendi...' : 'Ripeti giro (${tourStops.length})'),
+          ),
+        ],
         const SizedBox(height: 10),
         FilledButton(
           onPressed: loading ? null : _scan,
