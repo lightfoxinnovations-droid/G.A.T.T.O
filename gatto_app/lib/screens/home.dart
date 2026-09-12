@@ -23,6 +23,8 @@ class _HomePageState extends State<HomePage> {
   String diagnosis = '';
   String patrolTitle = 'Fermo';
   String patrolSubtitle = 'Pattugliamento';
+  String lightValue = '—';
+  String lightHint = 'GY-302';
   Timer? _poll;
 
   @override
@@ -56,6 +58,13 @@ class _HomePageState extends State<HomePage> {
           diagnosis = status.patrolDiagnosis;
         }
         tourStops = status.tourStops;
+        if (status.lightOk && status.lightLux != null) {
+          lightValue = '${status.lightLux} lx';
+          lightHint = status.lightLabel;
+        } else {
+          lightValue = '—';
+          lightHint = status.lightLabel.isEmpty ? 'Non collegato' : status.lightLabel;
+        }
       });
     } catch (_) {}
   }
@@ -160,9 +169,9 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: _stat('Umidità', '68%')),
+            Expanded(child: _stat('Umidità', 'n.d.')),
             const SizedBox(width: 10),
-            Expanded(child: _stat('Luce', '840 lx')),
+            Expanded(child: _stat('Luce', lightValue, hint: lightHint)),
           ],
         ),
       ],
@@ -188,7 +197,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _stat(String label, String value) {
+  Widget _stat(String label, String value, {String? hint}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -202,6 +211,10 @@ class _HomePageState extends State<HomePage> {
           Text(label, style: const TextStyle(color: Color(0xFF6B7280))),
           const SizedBox(height: 6),
           Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: gattoGreenDark)),
+          if (hint != null) ...[
+            const SizedBox(height: 4),
+            Text(hint, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
         ],
       ),
     );

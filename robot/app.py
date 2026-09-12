@@ -34,9 +34,32 @@ IMX_MODEL = "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320
 IMX_LABELS = "/usr/share/rpi-camera-assets/imx500_mobilenet_ssd.json"
 PLANT_LABELS = {"potted plant", "vase", "potted_plant"}
 VISION_MODEL = "openrouter/free"
-OBSTACLE_CM = 28
-FORWARD_STEPS = 10
+OBSTACLE_CM = 70
+FORWARD_STEPS = 1
 INSPECT_COOLDOWN = 18
+PATROL_SPEED = 3
+TURN_SPEED = 8
+TURN_STEPS = 10
+MANUAL_SPEED = 8
+HEAD_SERVO = 15
+HEAD_CENTER = 90
+HEAD_LEFT = 48
+HEAD_RIGHT = 132
+LOOK_DOWN = -16
+LOOK_DOWN_LOW = -18
+SETTLE_S = 1.0
+OBSTACLE_LABELS = {
+    "person", "chair", "couch", "bed", "dining table", "tv",
+    "refrigerator", "bench",
+}
+head_angle = 90
+LOOK_SWEEPS = (
+    ("tutto a sinistra", 48),
+    ("a sinistra", 68),
+    ("davanti", 90),
+    ("a destra", 112),
+    ("tutto a destra", 132),
+)
 
 picam2 = None
 imx500_device = None
@@ -73,7 +96,16 @@ PLANT_PROMPT = (
     " individua eventuali problemi (foglie ingiallite, malattie"
     " o parassiti) e fornisci una soluzione pratica per"
     " risolverli. Spiega il ragionamento in italiano, in modo chiaro."
+    " Se hai un valore di lux misurato, usalo: non inventarlo"
+    " e non contraddirlo. Di' se la luce basta, è poca o è troppa"
+    " per quella pianta, e come spostarla o ombreggiarla."
 )
+BH1750_BUSES = (8, 1)
+BH1750_ADDRS = (0x23, 0x5C)
+BH1750_POWER_ON = 0x01
+BH1750_CONT_HRES = 0x10
+light_lock = threading.Lock()
+LIGHT = {"lux": None, "ok": False, "ts": 0, "ready": False, "addr": 0x23, "bus": 8}
 
 
 def run(cmd, timeout=40):
@@ -110,6 +142,108 @@ def tour_public():
         "current_steps": len(TOUR["current"]),
         "stops": [item.get("name") or "Fermata" for item in TOUR["stops"]],
     }
+
+
+def _smbus():
+    try:
+        from smbus import SMBus
+        return SMBus
+    except ImportError:
+        from smbus2 import SMBus
+        return SMBus
+
+
+def light_label(lux):
+    if lux < 20:
+        return "Buio"
+    if lux < 100:
+        return "Molto scarsa"
+    if lux < 300:
+        return "Ombra"
+    if lux < 800:
+        return "Interno"
+    if lux < 2500:
+        return "Luminoso"
+    if lux < 10000:
+        return "Molto luminoso"
+    return "Sole diretto"
+
+
+def read_light():
+    with light_lock:
+        now = time.time()
+        if LIGHT["ok"] and now - LIGHT["ts"] < 0.8:
+            return dict(LIGHT)
+        SMBus = _smbus()
+        last_error = None
+        for bus_n in BH1750_BUSES:
+            if not os.path.exists(f"/dev/i2c-{bus_n}"):
+                continue
+            for addr in BH1750_ADDRS:
+                bus = None
+                try:
+                    bus = SMBus(bus_n)
+                    if not LIGHT["ready"] or LIGHT["addr"] != addr or LIGHT["bus"] != bus_n:
+                        bus.write_byte(addr, BH1750_POWER_ON)
+                        time.sleep(0.02)
+                        bus.write_byte(addr, BH1750_CONT_HRES)
+                        time.sleep(0.18)
+                    data = bus.read_i2c_block_data(addr, BH1750_CONT_HRES, 2)
+                    bus.close()
+                    lux = ((data[0] << 8) + data[1]) / 1.2
+                    LIGHT.update(
+                        lux=round(lux, 1),
+                        ok=True,
+                        ts=now,
+                        ready=True,
+                        addr=addr,
+                        bus=bus_n,
+                    )
+                    return dict(LIGHT)
+                except Exception as error:
+                    last_error = error
+                    if bus is not None:
+                        try:
+                            bus.close()
+                        except Exception:
+                            pass
+        was_ok = LIGHT["ok"]
+        LIGHT.update(lux=None, ok=False, ts=now, ready=False)
+        if last_error and was_ok:
+            print("luce:", last_error)
+        return dict(LIGHT)
+
+
+def light_public():
+    data = read_light()
+    if not data["ok"] or data["lux"] is None:
+        return {"ok": False, "lux": None, "label": "Non collegato"}
+    lux = int(round(data["lux"]))
+    return {"ok": True, "lux": lux, "label": light_label(data["lux"])}
+
+
+def light_context():
+    data = light_public()
+    if not data["ok"]:
+        return (
+            "Sensore luce GY-302 non disponibile: non inventare un valore"
+            " di lux e non dare consigli di luce come se l'avessi misurata."
+        )
+    return (
+        f"Luce ambiente misurata ora dal GY-302: {data['lux']} lux"
+        f" ({data['label']}). Usa questo valore insieme alla foto per"
+        " capire se la pianta ha troppa o troppa poca luce e consigliare"
+        " spostamento, ombreggiatura o più ore di sole."
+    )
+
+
+def plant_prompt(extra=""):
+    parts = []
+    if extra and extra.strip():
+        parts.append(extra.strip())
+    parts.append(PLANT_PROMPT)
+    parts.append(light_context())
+    return "\n\n".join(parts)
 
 
 def _init_camera_unlocked():
@@ -330,6 +464,52 @@ def get_dog():
     return dog
 
 
+def set_gait_speed(value):
+    try:
+        get_dog().speed = value
+    except Exception:
+        pass
+
+
+def set_head(angle, settle=0.9):
+    global head_angle
+    target = max(40, min(150, int(angle)))
+    try:
+        servo = get_dog().servo
+        current = head_angle
+        step = 3 if target >= current else -3
+        pos = current
+        while pos != target:
+            nxt = pos + step
+            if (step > 0 and nxt > target) or (step < 0 and nxt < target):
+                nxt = target
+            servo.setServoAngle(HEAD_SERVO, nxt)
+            pos = nxt
+            time.sleep(0.045)
+        head_angle = target
+        if settle > 0:
+            time.sleep(settle)
+    except Exception as error:
+        print("testa:", error)
+
+
+def set_look_down(pitch=LOOK_DOWN, settle=0.3):
+    try:
+        get_dog().attitude(0, max(-18, min(18, int(pitch))), 0)
+        if settle > 0:
+            time.sleep(settle)
+    except Exception as error:
+        print("sguardo:", error)
+
+
+def reset_head_and_body():
+    set_head(HEAD_CENTER, 0.2)
+    try:
+        get_dog().attitude(0, 0, 0)
+    except Exception:
+        pass
+
+
 def apply_gait(direction):
     control = get_dog()
     getattr(control, WALK_COMMANDS[direction])()
@@ -347,7 +527,35 @@ def get_distance_cm():
         return int(sonic.get_distance())
     except Exception as error:
         print("ultrasuoni:", error)
-        return 80
+        return None
+
+
+def closest_distance():
+    samples = []
+    for _ in range(5):
+        value = get_distance_cm()
+        if value is not None and 3 < value < 300:
+            samples.append(value)
+        time.sleep(0.05)
+    if not samples:
+        return 100
+    samples.sort()
+    return samples[len(samples) // 2]
+
+
+def is_blocked(distance, detections=None):
+    if distance is not None and 5 <= distance < OBSTACLE_CM:
+        return True
+    for item in detections or []:
+        label = str(item.get("label") or "").lower()
+        if label in PLANT_LABELS:
+            continue
+        centered = abs(item.get("cx", 0.5) - 0.5) < 0.28
+        large = item.get("area", 0) > 0.18
+        labeled = label in OBSTACLE_LABELS
+        if centered and large and labeled:
+            return True
+    return False
 
 
 def apply_stop():
@@ -470,13 +678,37 @@ def plants_ahead():
     ]
 
 
-def turn(side):
-    if side == "left":
-        get_dog().turnLeft()
-        record_move("turn_left")
-        return
-    get_dog().turnRight()
-    record_move("turn_right")
+def turn(side, times=TURN_STEPS):
+    control = get_dog()
+    previous = control.speed
+    try:
+        apply_stop()
+        try:
+            control.attitude(0, 0, 0)
+        except Exception:
+            pass
+        apply_stop()
+        control.speed = TURN_SPEED
+        for index in range(times):
+            if robot_mode == "autonomous" and not still_patrolling():
+                break
+            if side == "left":
+                control.turnLeft()
+                record_move("turn_left")
+            else:
+                control.turnRight()
+                record_move("turn_right")
+            if (index + 1) % 3 == 0:
+                if side == "left":
+                    control.setpLeft()
+                    record_move("left")
+                else:
+                    control.setpRight()
+                    record_move("right")
+        apply_stop()
+    finally:
+        control.speed = previous
+        set_look_down(LOOK_DOWN, 0.2)
 
 
 def replay_move(move):
@@ -484,21 +716,26 @@ def replay_move(move):
         apply_gait(move)
         return
     if move == "turn_left":
-        get_dog().turnLeft()
+        turn("left", times=1)
         return
     if move == "turn_right":
-        get_dog().turnRight()
+        turn("right", times=1)
 
 
 def avoid_obstacle(distance, turn_right):
     PATROL["message"] = f"Ostacolo a {distance} cm, giro"
     add_chat("system", f"Ostacolo a {distance} cm, giro.", action="avoid")
+    apply_stop()
+    set_head(HEAD_CENTER, 0.1)
+    try:
+        get_dog().attitude(0, 0, 0)
+    except Exception:
+        pass
+    set_gait_speed(PATROL_SPEED)
     get_dog().backWard()
     record_move("backward")
-    for _ in range(3):
-        if not still_patrolling():
-            return not turn_right
-        turn("right" if turn_right else "left")
+    apply_stop()
+    turn("right" if turn_right else "left", times=TURN_STEPS)
     remember("avoid", f"ostacolo a {distance} cm", distance)
     return not turn_right
 
@@ -510,15 +747,17 @@ def inspect_plant(extra=""):
         add_chat("system", "Pianta già vista da poco, continuo.")
         return
     last_inspect_at = now
+    apply_stop()
+    set_head(HEAD_CENTER, 0.25)
+    set_look_down(LOOK_DOWN_LOW, 0.35)
     PATROL["message"] = "Sto analizzando la pianta"
     add_chat("system", "Pianta inquadrata. Avvio l'analisi IA.")
     if not API_KEY or not has_internet():
         PATROL["message"] = "Pianta vista, analisi in attesa di rete"
         add_chat("system", "Niente internet: cammino lo stesso. La diagnosi arriverà quando c'è rete.")
+        set_look_down(LOOK_DOWN, 0.2)
         return
-    prompt = PLANT_PROMPT
-    if extra:
-        prompt = extra.strip() + "\n\n" + PLANT_PROMPT
+    prompt = plant_prompt(extra)
     try:
         diagnosis, photo = ask_vision(prompt)
         PATROL["diagnosis"] = diagnosis
@@ -527,17 +766,28 @@ def inspect_plant(extra=""):
     except Exception as error:
         PATROL["message"] = "Analisi non riuscita, continuo"
         add_chat("system", f"Analisi non riuscita: {error}")
+    set_look_down(LOOK_DOWN, 0.2)
 
 
 def walk_forward(steps=FORWARD_STEPS):
+    set_head(HEAD_CENTER, 0.1)
+    set_look_down(LOOK_DOWN, 0.2)
     for _ in range(steps):
         if not still_patrolling() or patrol_paused:
             break
-        distance = get_distance_cm()
+        distance = closest_distance()
         PATROL["distance"] = distance
-        if 0 < distance < OBSTACLE_CM:
+        if is_blocked(distance, local_detections()):
+            apply_stop()
+            set_look_down(LOOK_DOWN, 0.15)
             break
         apply_gait("forward")
+        apply_stop()
+        set_look_down(LOOK_DOWN, 0.15)
+        time.sleep(0.15)
+    apply_stop()
+    set_look_down(LOOK_DOWN, 0.2)
+    time.sleep(SETTLE_S)
 
 
 def apply_local_action(action):
@@ -622,20 +872,86 @@ def handle_orders(orders):
     return acted
 
 
-def choose_local_action(distance):
-    plants = plants_ahead()
-    if plants:
-        best = max(plants, key=lambda item: item["score"] * (item["area"] + 0.05))
-        if best["area"] > 0.12 or (0 < distance < 55 and abs(best["cx"] - 0.5) < 0.22):
-            return "inspect", "Pianta vicina, la analizzo"
-        if best["cx"] < 0.38:
+def scan_view(name, angle):
+    set_head(angle, 0.95)
+    set_look_down(LOOK_DOWN, 0.15)
+    distance = closest_distance()
+    detections = local_detections()
+    plants = [
+        item for item in detections
+        if str(item["label"]).lower() in PLANT_LABELS
+    ]
+    PATROL["distance"] = distance
+    PATROL["message"] = f"Guardo {name}, {distance} cm"
+    return {
+        "name": name,
+        "distance": distance,
+        "plants": plants,
+        "detections": detections,
+        "blocked": is_blocked(distance, detections),
+    }
+
+
+def look_around():
+    apply_stop()
+    time.sleep(0.2)
+    set_look_down(LOOK_DOWN, 0.55)
+    views = {}
+    for name, angle in LOOK_SWEEPS:
+        if not still_patrolling():
+            set_head(HEAD_CENTER, 0.15)
+            break
+        views[name] = scan_view(name, angle)
+    if still_patrolling():
+        set_look_down(LOOK_DOWN_LOW, 0.35)
+        views["in basso"] = scan_view("in basso", HEAD_CENTER)
+    set_head(HEAD_CENTER, 0.2)
+    set_look_down(LOOK_DOWN, 0.2)
+    return views
+
+
+def _best_plant(data):
+    plants = data.get("plants") or []
+    if not plants:
+        return None
+    return max(plants, key=lambda item: item["score"] * (item["area"] + 0.05))
+
+
+def _open_cm(*items):
+    values = []
+    for item in items:
+        distance = (item or {}).get("distance") or 0
+        values.append(distance if distance > 0 else 99)
+    return min(values) if values else 99
+
+
+def choose_from_scan(views):
+    left_names = ("tutto a sinistra", "a sinistra")
+    right_names = ("tutto a destra", "a destra")
+    front_names = ("davanti", "in basso")
+    front = [views.get(name) for name in front_names]
+    if any((item or {}).get("blocked") for item in front) or _open_cm(*front) < OBSTACLE_CM:
+        cd = _open_cm(*front)
+        ld = _open_cm(*(views.get(name) for name in left_names))
+        rd = _open_cm(*(views.get(name) for name in right_names))
+        if ld >= rd:
+            return "avoid_left", f"Ostacolo a {int(cd)} cm, spazio a sinistra"
+        return "avoid_right", f"Ostacolo a {int(cd)} cm, spazio a destra"
+
+    for name in front_names + left_names + right_names:
+        data = views.get(name) or {}
+        plant = _best_plant(data)
+        if not plant:
+            continue
+        near = 0 < (data.get("distance") or 0) < 65
+        if name in front_names and (plant["area"] > 0.08 or near):
+            return "inspect", "Pianta davanti, la analizzo"
+        if name in left_names:
             return "left", "Vaso a sinistra, giro"
-        if best["cx"] > 0.62:
+        if name in right_names:
             return "right", "Vaso a destra, giro"
-        return "forward", "Vaso davanti, mi avvicino"
-    if 0 < distance < 45:
-        return "forward", "Libero, avanzo piano"
-    return "forward", "Libero, avanzo"
+
+    return "forward", "Libero, avanzo piano"
 
 
 def play_tour():
@@ -655,12 +971,16 @@ def play_tour():
             if not still_patrolling() or patrol_paused:
                 TOUR["playing"] = False
                 return
-            distance = get_distance_cm()
+            distance = closest_distance()
             PATROL["distance"] = distance
-            if 0 < distance < OBSTACLE_CM:
+            if is_blocked(distance, local_detections()):
                 avoid_obstacle(distance, True)
+                apply_stop()
+                time.sleep(SETTLE_S)
                 continue
             replay_move(move)
+            apply_stop()
+            time.sleep(0.12)
         if still_patrolling():
             inspect_plant(f"Sei fermo alla fermata «{name}».")
     TOUR["playing"] = False
@@ -679,11 +999,14 @@ def patrol_loop():
                 TOUR["playing"] = False
                 try:
                     apply_stop()
+                    reset_head_and_body()
+                    set_gait_speed(MANUAL_SPEED)
                 except Exception:
                     pass
             time.sleep(0.2)
             continue
         PATROL["running"] = True
+        set_gait_speed(PATROL_SPEED)
         try:
             orders = take_orders()
             if orders:
@@ -695,19 +1018,23 @@ def patrol_loop():
             if TOUR["playing"]:
                 play_tour()
                 continue
-            distance = get_distance_cm()
-            PATROL["distance"] = distance
-            if 0 < distance < OBSTACLE_CM:
-                turn_right = avoid_obstacle(distance, turn_right)
+            PATROL["message"] = "Mi fermo e guardo intorno"
+            views = look_around()
+            if not still_patrolling():
                 continue
-            action, message = choose_local_action(distance)
+            action, message = choose_from_scan(views)
             PATROL["message"] = message
             chatter += 1
             if action != "forward" or chatter >= 2:
                 add_chat("system", message, action=action)
                 chatter = 0
-            remember(action, message, distance)
-            apply_local_action(action)
+            remember(action, message, PATROL["distance"])
+            if action == "avoid_left":
+                turn_right = avoid_obstacle(PATROL["distance"] or 40, False)
+            elif action == "avoid_right":
+                turn_right = avoid_obstacle(PATROL["distance"] or 40, True)
+            else:
+                apply_local_action(action)
         except Exception as error:
             PATROL["message"] = f"Pausa: {error}"
             add_chat("system", f"Pausa: {error}")
@@ -784,6 +1111,7 @@ def robot_status():
         "patrol": PATROL,
         "tour": tour_public(),
         "connect": CONNECT_STATE,
+        "light": light_public(),
     })
 
 
@@ -811,13 +1139,17 @@ def set_mode():
         if mode != "autonomous":
             TOUR["playing"] = False
     if patrol_active:
-        PATROL.update(running=True, message="Guida locale avviata")
-        add_chat("system", "Guida locale avviata. L'IA cloud interviene solo sulle piante. Puoi darmi ordini.")
+        set_gait_speed(PATROL_SPEED)
+        reset_head_and_body()
+        PATROL.update(running=True, message="Guida lenta avviata, guardo intorno")
+        add_chat("system", "Cammino piano. Tra un passo e l'altro fermo la testa e guardo sinistra, centro e destra.")
     else:
         PATROL.update(running=False, message="Pattuglia ferma")
         add_chat("system", "Pattuglia ferma.")
         try:
             apply_stop()
+            reset_head_and_body()
+            set_gait_speed(MANUAL_SPEED)
         except Exception:
             pass
     return jsonify({"status": "success", "mode": robot_mode, "patrol": PATROL, "tour": tour_public()})
@@ -968,10 +1300,10 @@ def tour_clear():
 @app.route("/api/analyze", methods=["GET"])
 def analyze_plant():
     try:
-        diagnosis, photo = ask_vision(PLANT_PROMPT)
+        diagnosis, photo = ask_vision(plant_prompt())
         PATROL["diagnosis"] = diagnosis
         add_chat("ai", diagnosis, action="inspect", image=photo)
-        return jsonify({"status": "success", "diagnosis": diagnosis})
+        return jsonify({"status": "success", "diagnosis": diagnosis, "light": light_public()})
     except Exception as error:
         return jsonify({"status": "error", "message": str(error)}), 500
 

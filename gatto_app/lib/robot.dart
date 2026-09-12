@@ -31,6 +31,9 @@ class RobotStatus {
     required this.tourPlaying,
     required this.tourPaused,
     required this.tourStops,
+    required this.lightOk,
+    required this.lightLux,
+    required this.lightLabel,
   });
 
   final bool ok;
@@ -50,11 +53,15 @@ class RobotStatus {
   final bool tourPlaying;
   final bool tourPaused;
   final List<String> tourStops;
+  final bool lightOk;
+  final int? lightLux;
+  final String lightLabel;
 
   factory RobotStatus.fromJson(Map<String, dynamic> json) {
     final connect = (json['connect'] as Map?) ?? {};
     final patrol = (json['patrol'] as Map?) ?? {};
     final tour = (json['tour'] as Map?) ?? {};
+    final light = (json['light'] as Map?) ?? {};
     return RobotStatus(
       ok: json['status'] == 'success',
       configured: json['configured'] == true,
@@ -73,6 +80,9 @@ class RobotStatus {
       tourPlaying: tour['playing'] == true,
       tourPaused: tour['paused'] == true,
       tourStops: ((tour['stops'] as List?) ?? []).map((item) => '$item').toList(),
+      lightOk: light['ok'] == true,
+      lightLux: light['lux'] is num ? (light['lux'] as num).round() : null,
+      lightLabel: '${light['label'] ?? 'Non collegato'}',
     );
   }
 }

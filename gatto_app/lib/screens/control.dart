@@ -20,6 +20,7 @@ class _ControlPageState extends State<ControlPage> {
   String? error;
   String patrolMessage = 'In attesa';
   int patrolDistance = 0;
+  String lightText = '';
   bool patrolRunning = false;
   bool sending = false;
   bool tourRecording = false;
@@ -71,6 +72,9 @@ class _ControlPageState extends State<ControlPage> {
         tourRecording = status.tourRecording;
         tourPlaying = status.tourPlaying;
         tourStops = status.tourStops;
+        lightText = status.lightOk && status.lightLux != null
+            ? '${status.lightLux} lx · ${status.lightLabel}'
+            : '';
       });
       if (autonomous) {
         if (_poll == null) _watchPatrol(true);
@@ -177,9 +181,13 @@ class _ControlPageState extends State<ControlPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              patrolRunning
-                  ? (patrolDistance > 0 ? '$patrolMessage · ${patrolDistance} cm' : patrolMessage)
-                  : 'Pattuglia ferma',
+              [
+                if (patrolRunning)
+                  patrolDistance > 0 ? '$patrolMessage · ${patrolDistance} cm' : patrolMessage
+                else
+                  'Pattuglia ferma',
+                if (lightText.isNotEmpty) lightText,
+              ].join(' · '),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Color(0xFF4B5563)),

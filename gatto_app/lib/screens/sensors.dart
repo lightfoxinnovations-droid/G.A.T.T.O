@@ -1,20 +1,62 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../robot.dart';
 import '../theme.dart';
 
-class SensorsPage extends StatelessWidget {
+class SensorsPage extends StatefulWidget {
   const SensorsPage({super.key, required this.api});
 
   final RobotApi api;
 
   @override
+  State<SensorsPage> createState() => _SensorsPageState();
+}
+
+class _SensorsPageState extends State<SensorsPage> {
+  String lightValue = '—';
+  String lightLabel = 'In attesa';
+  bool lightOk = false;
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final status = await widget.api.status();
+      if (!mounted || status == null) return;
+      setState(() {
+        lightOk = status.lightOk;
+        if (status.lightOk && status.lightLux != null) {
+          lightValue = '${status.lightLux} lx';
+          lightLabel = status.lightLabel;
+        } else {
+          lightValue = '—';
+          lightLabel = status.lightLabel.isEmpty ? 'Non collegato' : status.lightLabel;
+        }
+      });
+    } catch (_) {}
+  }
+
+  @override
   Widget build(BuildContext context) {
-    const items = [
-      ('Umidità terreno', '68%', 'Ottimale', true),
-      ('Luce', '840 lx', 'Soleggiato', false),
-      ('Temperatura', '23°C', 'Stabile', true),
-      ('Batteria', '84%', 'In carica solare', true),
+    final items = [
+      ('Umidità terreno', '—', 'Non collegato', false),
+      ('Luce', lightValue, lightLabel, lightOk),
+      ('Temperatura', '—', 'Non collegato', false),
+      ('Batteria', '—', 'Non collegato', false),
     ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
