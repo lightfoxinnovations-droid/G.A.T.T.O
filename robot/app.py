@@ -245,10 +245,44 @@ def light_public():
     return {"ok": True, "lux": lux, "label": light_label(data["lux"])}
 
 
+FREENOVE_SERVER = "/home/gatito/Freenove_Robot_Dog_Kit_for_Raspberry_Pi/Code/Server"
+_gatto_adc = None
+
+
+def gatto_adc():
+    global _gatto_adc
+    if _gatto_adc is None:
+        if FREENOVE_SERVER not in sys.path:
+            sys.path.insert(0, FREENOVE_SERVER)
+        from ADS7830 import ADS7830
+        _gatto_adc = ADS7830()
+    return _gatto_adc
+
+
 def ads7830_read(bus, channel):
     command = ADS7830_CMD | ((((channel << 2) | (channel >> 1)) & 0x07) << 4)
     bus.write_byte(ADS7830_ADDR, command)
+    bus.read_byte(ADS7830_ADDR)
     return bus.read_byte(ADS7830_ADDR)
+
+
+def read_pack_volts():
+    try:
+        return float(gatto_adc().power(0))
+    except Exception:
+        if not os.path.exists("/dev/i2c-1"):
+            raise
+        SMBus = _smbus()
+        bus = SMBus(1)
+        try:
+            samples = []
+            for _ in range(9):
+                samples.append(ads7830_read(bus, 0))
+                time.sleep(0.003)
+            samples.sort()
+            return samples[4] / 255.0 * 5.0 * 3
+        finally:
+            bus.close()
 
 
 def read_battery():
@@ -256,40 +290,41 @@ def read_battery():
         now = time.time()
         if BATTERY["ok"] and now - BATTERY["ts"] < 0.8:
             return dict(BATTERY)
-        bus = None
         try:
-            if not os.path.exists("/dev/i2c-1"):
-                raise RuntimeError("i2c-1 assente")
-            SMBus = _smbus()
-            bus = SMBus(1)
-            samples = []
-            for _ in range(5):
-                samples.append(ads7830_read(bus, 0))
-                time.sleep(0.004)
-            bus.close()
-            bus = None
-            samples.sort()
-            raw = samples[2]
-            volts = raw / 255.0 * 5.0 * 3
-            if volts < 4.8 or volts > 9.6:
-                raise RuntimeError(f"tensione non valida: {volts:.2f}")
+            volts = read_pack_volts()
+            if volts < 5.4 or volts > 9.2:
+                raise RuntimeError(f"pacco cane non valido: {volts:.2f} V")
             BATTERY.update(volts=round(volts, 2), ok=True, ts=now)
             return dict(BATTERY)
         except Exception as error:
-            if bus is not None:
-                try:
-                    bus.close()
-                except Exception:
-                    pass
             was_ok = BATTERY["ok"]
             BATTERY.update(volts=None, ok=False, ts=now)
             if was_ok:
-                print("batteria:", error)
+                print("batteria cane:", error)
             return dict(BATTERY)
 
 
 def battery_percent(volts):
-    return max(0, min(100, int(round((volts - 6.4) / (8.4 - 6.4) * 100))))
+    points = (
+        (6.20, 0),
+        (6.50, 5),
+        (6.80, 12),
+        (7.00, 22),
+        (7.20, 35),
+        (7.40, 50),
+        (7.60, 68),
+        (7.80, 82),
+        (8.00, 92),
+        (8.40, 100),
+    )
+    if volts <= points[0][0]:
+        return 0
+    if volts >= points[-1][0]:
+        return 100
+    for (v0, p0), (v1, p1) in zip(points, points[1:]):
+        if volts <= v1:
+            return int(round(p0 + (p1 - p0) * (volts - v0) / (v1 - v0)))
+    return 100
 
 
 def battery_label(percent):

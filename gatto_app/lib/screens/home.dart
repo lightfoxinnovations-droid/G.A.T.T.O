@@ -75,7 +75,7 @@ class _HomePageState extends State<HomePage> {
           batteryValue = '${status.batteryPercent}%';
           final volts = status.batteryVolts;
           final voltText = volts == null ? '' : '${volts.toStringAsFixed(1).replaceAll('.', ',')} V · ';
-          batteryHint = '$voltText${status.batteryLabel}';
+          batteryHint = '$voltText${status.batteryLabel} · pacco Gatto';
         } else {
           batteryValue = '—';
           batteryHint = status.batteryLabel.isEmpty ? 'In attesa' : status.batteryLabel;
@@ -122,7 +122,7 @@ class _HomePageState extends State<HomePage> {
       ('Umidità terreno', '—', 'In arrivo', false),
       ('Luce', lightValue, lightHint, lightOk),
       ('Temperatura', '—', 'In arrivo', false),
-      ('Batteria', batteryValue, batteryHint, batteryOk),
+      ('Batteria Gatto', batteryValue, batteryHint, batteryOk),
     ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
