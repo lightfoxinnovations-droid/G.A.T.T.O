@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../battery.dart';
 import '../notify.dart';
 import '../robot.dart';
 import '../theme.dart';
@@ -24,6 +25,7 @@ class _AppShellState extends State<AppShell> {
   int tab = 0;
   bool linked = false;
   String linkLabel = 'In cerca...';
+  int? batteryPercent;
   Timer? _poll;
   late final List<Widget> pages;
 
@@ -53,12 +55,14 @@ class _AppShellState extends State<AppShell> {
         setState(() {
           linked = false;
           linkLabel = 'Senza rete';
+          batteryPercent = null;
         });
         await GattoNotify.pollRemote();
         return;
       }
       setState(() {
         linked = true;
+        batteryPercent = status.batteryOk ? status.batteryPercent : null;
         if (status.homeSsid.isNotEmpty && status.internet) {
           linkLabel = 'Collegato · ${status.homeSsid}';
         } else if (status.internet) {
@@ -80,6 +84,7 @@ class _AppShellState extends State<AppShell> {
       setState(() {
         linked = false;
         linkLabel = 'Senza rete';
+        batteryPercent = null;
       });
       await GattoNotify.pollRemote();
     }
@@ -129,6 +134,19 @@ class _AppShellState extends State<AppShell> {
                       ],
                     ),
                   ),
+                  if (batteryPercent != null) ...[
+                    Icon(gattoBatteryIcon(batteryPercent!), color: gattoBatteryColor(batteryPercent!), size: 22),
+                    const SizedBox(width: 2),
+                    Text(
+                      '$batteryPercent%',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        color: gattoBatteryColor(batteryPercent!),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   IconButton(
                     tooltip: 'Impostazioni',
                     onPressed: _openSettings,

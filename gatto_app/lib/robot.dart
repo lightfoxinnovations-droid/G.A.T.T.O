@@ -7,6 +7,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wifi_iot/wifi_iot.dart';
 
+import 'battery.dart';
+
 const hotspotSsid = 'G.A.T.T.O.';
 const hotspotPassword = 'gatto2026';
 const hotspotHost = '192.168.4.1:5000';
@@ -83,6 +85,9 @@ class RobotStatus {
     final battery = (json['battery'] as Map?) ?? {};
     final alerts = (json['alerts'] as Map?) ?? {};
     final push = (json['push'] as Map?) ?? {};
+    final volts = battery['volts'] is num ? (battery['volts'] as num).toDouble() : null;
+    final packOk = gattoPackOk(volts) && battery['ok'] == true;
+    final percent = packOk ? gattoPackPercent(volts!) : null;
     return RobotStatus(
       ok: json['status'] == 'success',
       configured: json['configured'] == true,
@@ -105,10 +110,10 @@ class RobotStatus {
       lightOk: light['ok'] == true,
       lightLux: light['lux'] is num ? (light['lux'] as num).round() : null,
       lightLabel: '${light['label'] ?? 'Non collegato'}',
-      batteryOk: battery['ok'] == true,
-      batteryVolts: battery['volts'] is num ? (battery['volts'] as num).toDouble() : null,
-      batteryPercent: battery['percent'] is num ? (battery['percent'] as num).round() : null,
-      batteryLabel: '${battery['label'] ?? 'Non collegato'}',
+      batteryOk: packOk,
+      batteryVolts: packOk ? volts : null,
+      batteryPercent: percent,
+      batteryLabel: packOk ? gattoPackLabel(percent!) : '${battery['label'] ?? 'Non collegato'}',
       alertsLatestId: alerts['latest_id'] as int? ?? 0,
       alertsCount: alerts['count'] as int? ?? 0,
       pushServer: '${push['server'] ?? 'https://ntfy.sh'}',

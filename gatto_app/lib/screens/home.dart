@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../battery.dart';
 import '../robot.dart';
 import '../theme.dart';
 
@@ -29,6 +30,7 @@ class _HomePageState extends State<HomePage> {
   String batteryValue = '—';
   String batteryHint = 'In attesa';
   bool batteryOk = false;
+  int? batteryPercent;
   Timer? _poll;
 
   @override
@@ -71,11 +73,12 @@ class _HomePageState extends State<HomePage> {
           lightHint = status.lightLabel.isEmpty ? 'In attesa' : status.lightLabel;
         }
         batteryOk = status.batteryOk;
+        batteryPercent = status.batteryPercent;
         if (status.batteryOk && status.batteryPercent != null) {
           batteryValue = '${status.batteryPercent}%';
           final volts = status.batteryVolts;
           final voltText = volts == null ? '' : '${volts.toStringAsFixed(1).replaceAll('.', ',')} V · ';
-          batteryHint = '$voltText${status.batteryLabel} · pacco Gatto';
+          batteryHint = '$voltText${status.batteryLabel}';
         } else {
           batteryValue = '—';
           batteryHint = status.batteryLabel.isEmpty ? 'In attesa' : status.batteryLabel;
@@ -122,7 +125,6 @@ class _HomePageState extends State<HomePage> {
       ('Umidità terreno', '—', 'In arrivo', false),
       ('Luce', lightValue, lightHint, lightOk),
       ('Temperatura', '—', 'In arrivo', false),
-      ('Batteria Gatto', batteryValue, batteryHint, batteryOk),
     ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -192,7 +194,7 @@ class _HomePageState extends State<HomePage> {
           crossAxisCount: 2,
           mainAxisSpacing: 10,
           crossAxisSpacing: 10,
-          childAspectRatio: 1.2,
+          childAspectRatio: 1.05,
           children: [
             for (final item in sensors)
               Container(
@@ -219,9 +221,55 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
               ),
+            _batteryTile(),
           ],
         ),
       ],
+    );
+  }
+
+  Widget _batteryTile() {
+    final percent = batteryPercent;
+    final color = percent == null ? const Color(0xFF9CA3AF) : gattoBatteryColor(percent);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFDCFCE7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(gattoBatteryIcon(percent ?? 0), color: color, size: 18),
+              const SizedBox(width: 6),
+              const Text('Batteria', style: TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
+            ],
+          ),
+          const Spacer(),
+          Text(batteryValue, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: gattoGreenDark)),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: percent == null ? 0 : percent / 100,
+              minHeight: 6,
+              backgroundColor: const Color(0xFFE5E7EB),
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            batteryHint,
+            style: TextStyle(
+              color: batteryOk ? color : const Color(0xFF9CA3AF),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
