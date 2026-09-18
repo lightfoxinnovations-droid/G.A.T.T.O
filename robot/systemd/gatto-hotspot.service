@@ -1,13 +1,16 @@
 [Unit]
-Description=G.A.T.T.O. hotspot
-After=NetworkManager.service gatto-reset.service
+Description=G.A.T.T.O. hotspot always on
+After=NetworkManager.service
 Wants=NetworkManager.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 User=gatito
-ExecStart=/home/gatito/gatto-hotspot/start.sh
+Restart=always
+RestartSec=20
+ExecStart=/home/gatito/gatto-hotspot/run.sh
 ExecStop=/home/gatito/gatto-hotspot/stop.sh
 
 [Install]

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check G.A.T.T.O. hotspot every two minutes
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=120s
+AccuracySec=15s
+Unit=gatto-hotspot-watch.service
+
+[Install]
+WantedBy=timers.target

@@ -37,3 +37,9 @@ gatto_app/android/app/debug
 gatto_app/android/app/profile
 gatto_app/android/app/release
 *.iml
+
+# Raspberry
+robot/__pycache__/
+robot/**/__pycache__/
+*.pyc
+robot/gatto-hotspot/*.log
