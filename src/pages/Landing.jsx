@@ -47,7 +47,7 @@ function Landing() {
         <div className="logo-hero-wrap">
           <img src="/logo.png" alt="G.A.T.T.O." className="logo-hero" />
         </div>
-        <div className="badge">Cane robot per l'orto</div>
+        <div className="badge">Il gatto robot per l'orto</div>
         <h1>
           Gestore Autonomo Tecnologico <span>Terreni Orti</span>
         </h1>

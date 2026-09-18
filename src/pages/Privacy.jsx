@@ -20,7 +20,7 @@ function Privacy() {
         </p>
         <h2>App e robot</h2>
         <p>
-          L’app parla con il robot sulla tua rete di casa. Comandi, camera e sensori restano in locale, sul cane.
+          L’app parla con il robot sulla tua rete di casa. Comandi, camera e sensori restano in locale, su Gatto.
         </p>
         <h2>Diagnosi delle piante</h2>
         <p>
