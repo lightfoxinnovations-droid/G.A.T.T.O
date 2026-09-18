@@ -129,6 +129,12 @@ ADS7830_ADDR = 0x48
 ADS7830_CMD = 0x84
 battery_lock = threading.Lock()
 BATTERY = {"volts": None, "ok": False, "ts": 0}
+soil_lock = threading.Lock()
+SOIL = {"raw": None, "volts": None, "ok": False, "ts": 0}
+SOIL_CH = 7
+# Capacitive: più alto = più secco. Valori tipici su ADS 5 V.
+SOIL_DRY_RAW = 148
+SOIL_WET_RAW = 72
 
 
 def run(cmd, timeout=40):
@@ -352,6 +358,80 @@ def battery_public():
     }
 
 
+def read_soil_raw():
+    try:
+        adc = gatto_adc()
+        samples = [int(adc.readAdc(SOIL_CH)) for _ in range(9)]
+        samples.sort()
+        return samples[4]
+    except Exception:
+        if not os.path.exists("/dev/i2c-1"):
+            raise
+        SMBus = _smbus()
+        bus = SMBus(1)
+        try:
+            samples = []
+            for _ in range(9):
+                samples.append(ads7830_read(bus, SOIL_CH))
+                time.sleep(0.003)
+            samples.sort()
+            return samples[4]
+        finally:
+            bus.close()
+
+
+def read_soil():
+    with soil_lock:
+        now = time.time()
+        if SOIL["ok"] and now - SOIL["ts"] < 0.8:
+            return dict(SOIL)
+        try:
+            raw = read_soil_raw()
+            if raw < 25 or raw > 240:
+                raise RuntimeError(f"umidità CH7 non valida: {raw}")
+            volts = round(raw / 255.0 * 5.0, 2)
+            SOIL.update(raw=int(raw), volts=volts, ok=True, ts=now)
+            return dict(SOIL)
+        except Exception as error:
+            was_ok = SOIL["ok"]
+            SOIL.update(raw=None, volts=None, ok=False, ts=now)
+            if was_ok:
+                print("umidità terreno:", error)
+            return dict(SOIL)
+
+
+def soil_percent(raw):
+    if raw >= SOIL_DRY_RAW:
+        return 0
+    if raw <= SOIL_WET_RAW:
+        return 100
+    return int(round((SOIL_DRY_RAW - raw) * 100 / (SOIL_DRY_RAW - SOIL_WET_RAW)))
+
+
+def soil_label(percent):
+    if percent >= 70:
+        return "Bagnato"
+    if percent >= 40:
+        return "Umido"
+    if percent >= 15:
+        return "Asciutto"
+    return "Secco"
+
+
+def soil_public():
+    data = read_soil()
+    if not data["ok"] or data["raw"] is None:
+        return {"ok": False, "percent": None, "volts": None, "raw": None, "label": "Non collegato"}
+    percent = soil_percent(data["raw"])
+    return {
+        "ok": True,
+        "percent": percent,
+        "volts": data["volts"],
+        "raw": data["raw"],
+        "label": soil_label(percent),
+    }
+
+
 def light_context():
     data = light_public()
     if not data["ok"]:
@@ -373,7 +453,24 @@ def plant_prompt(extra=""):
         parts.append(extra.strip())
     parts.append(PLANT_PROMPT)
     parts.append(light_context())
+    parts.append(soil_context())
     return "\n\n".join(parts)
+
+
+def soil_context():
+    data = soil_public()
+    if not data["ok"]:
+        return (
+            "Sensore umidità terreno (ADS7830 CH7) non disponibile:"
+            " non inventare un valore e non dare consigli di annaffiatura"
+            " come se l'avessi misurata."
+        )
+    return (
+        f"Umidità del terreno misurata ora dalla sonda analogica su ADS7830 CH7:"
+        f" {data['percent']}% ({data['label']}, {data['volts']} V)."
+        " Usala insieme alla foto per dire se la terra è secca o bagnata"
+        " e se serve annaffiare."
+    )
 
 
 def shorten_diagnosis(text, max_lines=10):
@@ -1603,6 +1700,7 @@ def robot_status():
         "connect": CONNECT_STATE,
         "light": light_public(),
         "battery": battery_public(),
+        "soil": soil_public(),
         "alerts": {
             "latest_id": ALERT_ID,
             "count": len(ALERTS),
@@ -1841,6 +1939,7 @@ def analyze_plant():
             "image": photo,
             "alert": alert,
             "light": light_public(),
+            "soil": soil_public(),
         })
     except Exception as error:
         return jsonify({"status": "error", "message": str(error)}), 500

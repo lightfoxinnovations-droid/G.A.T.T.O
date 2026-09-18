@@ -31,6 +31,9 @@ class _HomePageState extends State<HomePage> {
   String batteryHint = 'In attesa';
   bool batteryOk = false;
   int? batteryPercent;
+  String soilValue = '—';
+  String soilHint = 'In attesa';
+  bool soilOk = false;
   Timer? _poll;
 
   @override
@@ -71,6 +74,14 @@ class _HomePageState extends State<HomePage> {
         } else {
           lightValue = '—';
           lightHint = status.lightLabel.isEmpty ? 'In attesa' : status.lightLabel;
+        }
+        soilOk = status.soilOk;
+        if (status.soilOk && status.soilPercent != null) {
+          soilValue = '${status.soilPercent}%';
+          soilHint = status.soilLabel;
+        } else {
+          soilValue = '—';
+          soilHint = status.soilLabel.isEmpty ? 'In attesa' : status.soilLabel;
         }
         batteryOk = status.batteryOk;
         batteryPercent = status.batteryPercent;
@@ -122,7 +133,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final sensors = [
-      ('Umidità terreno', '—', 'In arrivo', false),
+      ('Umidità terreno', soilValue, soilHint, soilOk),
       ('Luce', lightValue, lightHint, lightOk),
       ('Temperatura', '—', 'In arrivo', false),
     ];

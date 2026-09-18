@@ -12,7 +12,11 @@ import 'battery.dart';
 const hotspotSsid = 'G.A.T.T.O.';
 const hotspotPassword = 'gatto2026';
 const hotspotHost = '192.168.4.1:5000';
-const fallbackLanHost = '10.0.0.110:5000';
+const fallbackHosts = [
+  '10.0.0.105:5000',
+  '10.0.0.110:5000',
+  '100.76.44.36:5000',
+];
 
 class RobotStatus {
   const RobotStatus({
@@ -41,6 +45,9 @@ class RobotStatus {
     required this.batteryVolts,
     required this.batteryPercent,
     required this.batteryLabel,
+    required this.soilOk,
+    required this.soilPercent,
+    required this.soilLabel,
     required this.alertsLatestId,
     required this.alertsCount,
     required this.pushServer,
@@ -72,6 +79,9 @@ class RobotStatus {
   final double? batteryVolts;
   final int? batteryPercent;
   final String batteryLabel;
+  final bool soilOk;
+  final int? soilPercent;
+  final String soilLabel;
   final int alertsLatestId;
   final int alertsCount;
   final String pushServer;
@@ -83,6 +93,7 @@ class RobotStatus {
     final tour = (json['tour'] as Map?) ?? {};
     final light = (json['light'] as Map?) ?? {};
     final battery = (json['battery'] as Map?) ?? {};
+    final soil = (json['soil'] as Map?) ?? {};
     final alerts = (json['alerts'] as Map?) ?? {};
     final push = (json['push'] as Map?) ?? {};
     final volts = battery['volts'] is num ? (battery['volts'] as num).toDouble() : null;
@@ -114,6 +125,9 @@ class RobotStatus {
       batteryVolts: packOk ? volts : null,
       batteryPercent: percent,
       batteryLabel: packOk ? gattoPackLabel(percent!) : '${battery['label'] ?? 'Non collegato'}',
+      soilOk: soil['ok'] == true,
+      soilPercent: soil['percent'] is num ? (soil['percent'] as num).round() : null,
+      soilLabel: '${soil['label'] ?? 'Non collegato'}',
       alertsLatestId: alerts['latest_id'] as int? ?? 0,
       alertsCount: alerts['count'] as int? ?? 0,
       pushServer: '${push['server'] ?? 'https://ntfy.sh'}',
@@ -389,11 +403,9 @@ class RobotApi {
     return prefs.getBool('gatto-configured') ?? false;
   }
 
-  Future<bool> _tryHost(String candidate) async {
+  Future<bool> _tryHost(String candidate, {Duration timeout = const Duration(seconds: 3)}) async {
     try {
-      final response = await http
-          .get(Uri.parse('http://$candidate/api/status'))
-          .timeout(const Duration(seconds: 3));
+      final response = await http.get(Uri.parse('http://$candidate/api/status')).timeout(timeout);
       if (response.statusCode == 200) {
         host = candidate;
         await persistHost();
@@ -403,17 +415,49 @@ class RobotApi {
     return false;
   }
 
+  Future<List<String>> _subnetHosts() async {
+    try {
+      final ip = await NetworkInfo().getWifiIP();
+      if (ip == null || !ip.contains('.')) return [];
+      final parts = ip.split('.');
+      if (parts.length != 4) return [];
+      if (parts[0] == '192' && parts[1] == '168' && parts[2] == '4') return [];
+      final prefix = '${parts[0]}.${parts[1]}.${parts[2]}';
+      final self = int.tryParse(parts[3]) ?? -1;
+      return [
+        for (var i = 1; i <= 254; i++)
+          if (i != self) '$prefix.$i:5000',
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<bool> _scanLan() async {
+    final hosts = await _subnetHosts();
+    if (hosts.isEmpty) return false;
+    const batch = 32;
+    for (var i = 0; i < hosts.length; i += batch) {
+      final slice = hosts.sublist(i, i + batch > hosts.length ? hosts.length : i + batch);
+      final found = await Future.wait(
+        slice.map((candidate) => _tryHost(candidate, timeout: const Duration(milliseconds: 500))),
+      );
+      if (found.any((ok) => ok)) return true;
+    }
+    return false;
+  }
+
   Future<bool> locate() async {
     final saved = await lastHost();
     final candidates = <String>[
       hotspotHost,
       if (saved != null && saved.isNotEmpty) saved,
-      fallbackLanHost,
+      ...fallbackHosts,
     ];
     for (final candidate in candidates.toSet()) {
       if (await _tryHost(candidate)) return true;
     }
-    return false;
+    return _scanLan();
   }
 
   Future<String?> currentSsid() async {

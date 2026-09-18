@@ -52,7 +52,7 @@ function Landing() {
           Gestore Autonomo Tecnologico <span>Terreni Orti</span>
         </h1>
         <p className="hero-text">
-          G.A.T.T.O. cammina tra vasi e aiuole, guarda ogni pianta, tiene luce e batteria sotto controllo e ti avvisa se qualcosa sta male. L’archivio confronta oggi con una settimana fa.
+          G.A.T.T.O. cammina tra vasi e aiuole, guarda ogni pianta, tiene luce, umidità del terreno e batteria sotto controllo e ti avvisa se qualcosa sta male. L’archivio confronta oggi con una settimana fa.
         </p>
         <div className="hero-actions">
           <a href="#download" className="analyze-btn">
@@ -84,9 +84,14 @@ function Landing() {
                 <em>Buio</em>
               </div>
               <div>
+                <small>Umidità</small>
+                <b>9%</b>
+                <em>Secco</em>
+              </div>
+              <div>
                 <small>Batteria</small>
-                <b>56%</b>
-                <em>7,5 V · Buona</em>
+                <b>92%</b>
+                <em>8,0 V · Carica</em>
               </div>
             </div>
           </Phone>
@@ -165,7 +170,7 @@ function Landing() {
           <p className="features-kicker">Cosa fa oggi</p>
           <h2 id="features-title">Quello che è già pronto</h2>
           <p className="features-lead">
-            Luce e batteria sono vere. Umidità e temperatura arrivano quando i sensori sono collegati.
+            Luce, umidità del terreno e batteria di Gatto sono vere. La temperatura arriva quando il sensore è collegato.
           </p>
         </div>
         <div className="features-grid">
@@ -203,10 +208,10 @@ function Landing() {
       <section id="download" className="download">
         <div className="download-inner">
           <h2>Scarica l'app</h2>
-          <p>Android, versione 1.1.11 · circa 51 MB. Non è sul Play Store: si installa dal file.</p>
+          <p>Android, versione 1.1.12 · circa 51 MB. Non è sul Play Store: si installa dal file.</p>
           <div className="download-card">
             <div className="download-actions">
-              <a className="store-btn android" href="/gatto.apk?v=19" download="gatto.apk">
+              <a className="store-btn android" href="/gatto.apk?v=20" download="gatto.apk">
                 Scarica per Android
               </a>
               <button type="button" className="store-btn ios" disabled>
