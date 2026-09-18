@@ -174,8 +174,8 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               Text(
                 remoteAlerts
-                    ? 'Attive. Se sei fuori casa o il telefono era spento, l\'avviso arriva appena c\'è internet.'
-                    : 'Apri l\'app una volta a casa, collegato a Gatto: poi gli avvisi ti raggiungono anche lontano.',
+                    ? 'Attive anche a app chiusa. Resta una notifica silenziosa «G.A.T.T.O. in ascolto»: non disattivarla, altrimenti gli avvisi arrivano solo quando apri l\'app.'
+                    : 'Apri l\'app una volta a casa, collegato a Gatto: da lì gli avvisi arrivano anche lontano e a app chiusa.',
                 style: const TextStyle(color: Color(0xFF4B5563), height: 1.45),
               ),
             ],

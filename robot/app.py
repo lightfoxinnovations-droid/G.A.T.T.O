@@ -1662,6 +1662,8 @@ def connect_wifi(ssid, password):
     result = run(cmd, timeout=45)
     if result.returncode == 0:
         time.sleep(2)
+        run(["sudo", "-n", "nmcli", "connection", "modify", ssid, "802-11-wireless.band", "bg"])
+        run(["sudo", "-n", "nmcli", "connection", "modify", ssid, "connection.autoconnect", "yes"])
         realign_hotspot()
         CONNECT_STATE.update(
             busy=False,

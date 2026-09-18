@@ -193,7 +193,7 @@ function Landing() {
               <BellRing strokeWidth={1.75} />
             </div>
             <h3>Avvisi quando serve</h3>
-            <p>Notifica sul telefono, anche lontano da casa o se era spento: arriva appena torni online.</p>
+            <p>Notifica sul telefono anche a app chiusa, lontano da casa o se era spento: arriva appena c’è internet.</p>
           </article>
           <article className="feature-card">
             <div className="feature-icon" aria-hidden="true">
@@ -208,10 +208,10 @@ function Landing() {
       <section id="download" className="download">
         <div className="download-inner">
           <h2>Scarica l'app</h2>
-          <p>Android, versione 1.1.12 · circa 51 MB. Non è sul Play Store: si installa dal file.</p>
+          <p>Android, versione 1.1.13 · circa 51 MB. Non è sul Play Store: si installa dal file.</p>
           <div className="download-card">
             <div className="download-actions">
-              <a className="store-btn android" href="/gatto.apk?v=20" download="gatto.apk">
+              <a className="store-btn android" href="/gatto.apk?v=21" download="gatto.apk">
                 Scarica per Android
               </a>
               <button type="button" className="store-btn ios" disabled>

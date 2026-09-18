@@ -1,7 +1,7 @@
 name: gatto_app
 description: App G.A.T.T.O. per configurare e controllare il robot.
 publish_to: "none"
-version: 1.1.12+18
+version: 1.1.13+19
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -16,6 +16,7 @@ dependencies:
   shared_preferences: ^2.3.3
   wifi_iot: ^0.3.19
   flutter_local_notifications: ^18.0.1
+  flutter_background_service: ^5.1.0
   workmanager: ^0.10.10
 
 dev_dependencies:
