@@ -208,10 +208,10 @@ function Landing() {
       <section id="download" className="download">
         <div className="download-inner">
           <h2>Scarica l'app</h2>
-          <p>Android, versione 1.1.13 · circa 51 MB. Non è sul Play Store: si installa dal file.</p>
+          <p>Android, versione 1.1.14 · circa 51 MB. Non è sul Play Store: si installa dal file.</p>
           <div className="download-card">
             <div className="download-actions">
-              <a className="store-btn android" href="/gatto.apk?v=22" download="gatto.apk">
+              <a className="store-btn android" href="/gatto.apk?v=23" download="gatto.apk">
                 Scarica per Android
               </a>
               <button type="button" className="store-btn ios" disabled>

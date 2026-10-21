@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -382,8 +384,25 @@ class WifiNetwork {
 class RobotApi {
   RobotApi();
 
-  final http.Client _client = http.Client();
+  http.Client _client = _openClient();
   String? host;
+  RobotStatus? _statusCache;
+  DateTime _statusAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Future<RobotStatus?>? _statusFlight;
+  String? _ssidCache;
+  DateTime _ssidAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  static http.Client _openClient() {
+    final io = HttpClient()
+      ..connectionTimeout = const Duration(milliseconds: 700)
+      ..idleTimeout = const Duration(seconds: 15);
+    return IOClient(io);
+  }
+
+  void _reopenClient() {
+    _client.close();
+    _client = _openClient();
+  }
 
   Uri _uri(String path) => Uri.parse('http://$host$path');
 
@@ -449,10 +468,18 @@ class RobotApi {
       if (parts[0] == '192' && parts[1] == '168' && parts[2] == '4') return [];
       final prefix = '${parts[0]}.${parts[1]}.${parts[2]}';
       final self = int.tryParse(parts[3]) ?? -1;
-      return [
-        for (var i = 1; i <= 40; i++)
-          if (i != self) '$prefix.$i:5000',
+      final order = <int>[
+        1,
+        for (var i = 100; i <= 130; i++) i,
+        for (var i = 2; i <= 40; i++) i,
       ];
+      final seen = <int>{};
+      final hosts = <String>[];
+      for (final i in order) {
+        if (i == self || !seen.add(i)) continue;
+        hosts.add('$prefix.$i:5000');
+      }
+      return hosts;
     } catch (_) {
       return [];
     }
@@ -475,12 +502,12 @@ class RobotApi {
   Future<bool> scanLan() async {
     final hosts = await _subnetHosts();
     if (hosts.isEmpty) return false;
-    const batch = 10;
+    const batch = 16;
     for (var i = 0; i < hosts.length; i += batch) {
       final end = i + batch > hosts.length ? hosts.length : i + batch;
       final found = await _firstReachable(
         hosts.sublist(i, end),
-        timeout: const Duration(milliseconds: 400),
+        timeout: const Duration(milliseconds: 350),
       );
       if (found) return true;
     }
@@ -506,6 +533,35 @@ class RobotApi {
     } catch (_) {}
   }
 
+  Future<void> rebind() async {
+    await bindToWifi();
+    _reopenClient();
+    _statusCache = null;
+  }
+
+  Future<bool> _onHotspot() async {
+    if (DateTime.now().difference(_ssidAt) > const Duration(seconds: 4)) {
+      _ssidCache = await currentSsid();
+      _ssidAt = DateTime.now();
+    }
+    return isHotspotSsid(_ssidCache);
+  }
+
+  Future<http.Response?> _getRetry(String path, Duration timeout) async {
+    try {
+      return await _client.get(_uri(path)).timeout(timeout);
+    } catch (_) {
+      if (!await _onHotspot()) return null;
+      await bindToWifi();
+      _reopenClient();
+      try {
+        return await _client.get(_uri(path)).timeout(const Duration(milliseconds: 900));
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
   Future<void> releaseWifi() async {
     try {
       await WiFiForIoTPlugin.forceWifiUsage(false);
@@ -517,12 +573,32 @@ class RobotApi {
     return status.isGranted || status.isLimited;
   }
 
-  Future<RobotStatus?> status() async {
+  Future<RobotStatus?> status({bool fresh = false}) {
+    final age = DateTime.now().difference(_statusAt);
+    if (!fresh && _statusCache != null && age < const Duration(milliseconds: 1200)) {
+      return Future.value(_statusCache);
+    }
+    final flight = _statusFlight;
+    if (!fresh && flight != null) return flight;
+    final next = _fetchStatus();
+    _statusFlight = next;
+    return next.whenComplete(() {
+      if (identical(_statusFlight, next)) _statusFlight = null;
+    });
+  }
+
+  Future<RobotStatus?> _fetchStatus() async {
     if (host == null) return null;
     try {
-      final response = await _client.get(_uri('/api/status')).timeout(const Duration(seconds: 4));
-      if (response.statusCode != 200) return null;
-      return RobotStatus.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+      final response = await _getRetry('/api/status', const Duration(seconds: 3));
+      if (response == null || response.statusCode != 200) {
+        _statusCache = null;
+        return null;
+      }
+      final parsed = RobotStatus.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+      _statusCache = parsed;
+      _statusAt = DateTime.now();
+      return parsed;
     } catch (_) {
       return null;
     }
@@ -530,7 +606,13 @@ class RobotApi {
 
   Future<List<WifiNetwork>> scan() async {
     if (host == null) return [];
-    final response = await _client.get(_uri('/api/wifi/scan')).timeout(const Duration(seconds: 12));
+    http.Response response;
+    try {
+      response = await _client.get(_uri('/api/wifi/scan')).timeout(const Duration(seconds: 14));
+    } catch (_) {
+      await rebind();
+      response = await _client.get(_uri('/api/wifi/scan')).timeout(const Duration(seconds: 10));
+    }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final items = (data['networks'] as List?) ?? [];
     return items
@@ -558,9 +640,9 @@ class RobotApi {
   }
 
   Future<RobotStatus> waitForConnect() async {
-    for (var i = 0; i < 20; i++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      final current = await status();
+    for (var i = 0; i < 40; i++) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      final current = await status(fresh: true);
       if (current == null) continue;
       if (!current.connectBusy && (current.connectOk || current.configured)) {
         return current;
@@ -588,11 +670,12 @@ class RobotApi {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'mode': mode}),
         )
-        .timeout(const Duration(seconds: 6));
+        .timeout(const Duration(milliseconds: 1800));
     if (response.statusCode >= 400) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       throw Exception(data['message'] ?? 'Modalità non cambiata.');
     }
+    _statusCache = null;
   }
 
   Future<void> move(String direction) async {
@@ -603,7 +686,7 @@ class RobotApi {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'direction': direction}),
         )
-        .timeout(const Duration(seconds: 6));
+        .timeout(const Duration(milliseconds: 1800));
     if (response.statusCode >= 400) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       throw Exception(data['message'] ?? 'Movimento non inviato.');
@@ -640,11 +723,22 @@ class RobotApi {
 
   String cameraUrl([int tick = 0]) => 'http://$host/api/camera.jpg?t=$tick';
 
+  Future<Uint8List?> diagnosisPhoto() async {
+    if (host == null) return null;
+    try {
+      final response = await _getRetry('/api/patrol/photo.jpg', const Duration(seconds: 3));
+      if (response == null || response.statusCode != 200 || response.bodyBytes.isEmpty) return null;
+      return response.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Uint8List?> cameraFrame() async {
     if (host == null) return null;
     try {
-      final response = await _client.get(_uri('/api/camera.jpg')).timeout(const Duration(seconds: 3));
-      if (response.statusCode != 200 || response.bodyBytes.isEmpty) return null;
+      final response = await _getRetry('/api/camera.jpg', const Duration(seconds: 3));
+      if (response == null || response.statusCode != 200 || response.bodyBytes.isEmpty) return null;
       return response.bodyBytes;
     } catch (_) {
       return null;

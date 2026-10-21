@@ -245,7 +245,8 @@ def read_light():
 
 
 def light_public():
-    data = read_light()
+    with light_lock:
+        data = dict(LIGHT)
     if not data["ok"] or data["lux"] is None:
         return {"ok": False, "lux": None, "label": "Non collegato"}
     lux = int(round(data["lux"]))
@@ -365,7 +366,8 @@ def battery_label(percent):
 
 
 def battery_public():
-    data = read_battery()
+    with battery_lock:
+        data = dict(BATTERY)
     if not data["ok"] or data["volts"] is None:
         return {"ok": False, "volts": None, "percent": None, "label": "Non collegato"}
     percent = battery_percent(data["volts"])
@@ -439,7 +441,8 @@ def soil_label(percent):
 
 
 def soil_public():
-    data = read_soil()
+    with soil_lock:
+        data = dict(SOIL)
     if not data["ok"] or data["raw"] is None:
         return {"ok": False, "percent": None, "volts": None, "raw": None, "label": "Non collegato"}
     percent = soil_percent(data["raw"])
@@ -776,11 +779,18 @@ def maybe_alert_plant(diagnosis, photo=""):
     return item
 
 
+PUSH_CACHE = None
+
+
 def push_config():
+    global PUSH_CACHE
+    if PUSH_CACHE is not None:
+        return PUSH_CACHE
     try:
         with open(PUSH_PATH, encoding="utf-8") as handle:
             data = json.load(handle)
         if data.get("topic") and data.get("server"):
+            PUSH_CACHE = data
             return data
     except Exception:
         pass
@@ -792,6 +802,7 @@ def push_config():
     os.makedirs(folder, exist_ok=True)
     with open(PUSH_PATH, "w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=True, indent=2)
+    PUSH_CACHE = data
     return data
 
 
@@ -899,9 +910,9 @@ def refresh_live():
                     raw = handle.read()
                 image = None
         if image is None:
-            LIVE_JPEG = make_thumb_bytes(raw, max_w=320, quality=36)
+            LIVE_JPEG = make_thumb_bytes(raw, max_w=300, quality=32)
             return
-        LIVE_JPEG = _encode_jpeg(image, 320, 36)
+        LIVE_JPEG = _encode_jpeg(image, 300, 32)
     except Exception as error:
         print("live:", error)
 
@@ -1013,15 +1024,67 @@ SCAN_CACHE = {"ts": 0.0, "networks": []}
 scan_lock = threading.Lock()
 
 
+def split_nmcli(line):
+    fields = []
+    buf = []
+    escaped = False
+    for char in line:
+        if escaped:
+            buf.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == ":":
+            fields.append("".join(buf))
+            buf = []
+            continue
+        buf.append(char)
+    fields.append("".join(buf))
+    return fields
+
+
+def iw_channel(text):
+    if not text:
+        return None
+    match = re.search(r"channel (\d+)", text)
+    if not match:
+        return None
+    channel = int(match.group(1))
+    if 1 <= channel <= 13:
+        return channel
+    return None
+
+
 def read_home_ssid():
+    # iw non scatena uno scan: nmcli device wifi sì, e sulla stessa radio spegne i beacon.
     try:
-        result = run(["nmcli", "-t", "-f", "ACTIVE,SSID", "device", "wifi"], timeout=8)
+        result = run(["/usr/sbin/iw", "dev", "wlan0", "info"], timeout=3)
+    except Exception:
+        result = None
+    if result is not None and result.returncode == 0:
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("ssid "):
+                ssid = stripped[5:].strip()
+                if ssid and ssid != HOTSPOT_SSID:
+                    return ssid
+    try:
+        result = run(
+            ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"],
+            timeout=4,
+        )
     except Exception:
         return ""
     for line in result.stdout.splitlines():
-        parts = line.split(":", 1)
-        if len(parts) == 2 and parts[0] == "yes" and parts[1] and parts[1] != HOTSPOT_SSID:
-            return parts[1]
+        parts = split_nmcli(line)
+        if len(parts) < 3 or parts[2] != "wlan0":
+            continue
+        if not parts[1].startswith("802-11-wireless"):
+            continue
+        if parts[0] and parts[0] != HOTSPOT_SSID:
+            return parts[0]
     return ""
 
 
@@ -1041,12 +1104,8 @@ def note_ssid(ssid):
 
 
 def home_ssid():
-    deadline = time.time() + 2
-    while True:
-        with net_lock:
-            if NET["ready"] or time.time() >= deadline:
-                return NET["ssid"]
-        time.sleep(0.05)
+    with net_lock:
+        return NET["ssid"]
 
 
 def has_internet():
@@ -1067,12 +1126,16 @@ def net_loop():
                 NET["internet"] = online
         except Exception as error:
             print("rete:", error)
-        time.sleep(12)
+        time.sleep(8)
 
 
 def realign_hotspot():
-    check = run(["/usr/sbin/iw", "dev", "ap0", "info"], timeout=5)
-    if check.returncode == 0 and "type AP" in check.stdout:
+    ap = run(["/usr/sbin/iw", "dev", "ap0", "info"], timeout=4)
+    sta = run(["/usr/sbin/iw", "dev", "wlan0", "info"], timeout=4)
+    ap_up = ap.returncode == 0 and "type AP" in ap.stdout
+    ap_ch = iw_channel(ap.stdout)
+    sta_ch = iw_channel(sta.stdout) if "ssid " in sta.stdout else None
+    if ap_up and (sta_ch is None or sta_ch == ap_ch):
         return
     if run(["systemctl", "is-enabled", "gatto-hotspot.service"], timeout=5).returncode == 0:
         run(["sudo", "-n", "systemctl", "restart", "gatto-hotspot.service"], timeout=30)
@@ -1707,12 +1770,46 @@ def patrol_loop():
 
 def camera_loop():
     while True:
-        want = patrol_active or (time.time() - last_camera_request < 10)
+        want = patrol_active or (time.time() - last_camera_request < 8)
         if want:
             refresh_live()
-            time.sleep(0.85)
+            time.sleep(0.7)
         else:
-            time.sleep(0.6)
+            time.sleep(0.3)
+
+
+def sense_loop():
+    while True:
+        for reader in (read_light, read_battery, read_soil):
+            try:
+                reader()
+            except Exception as error:
+                print("sensori:", error)
+        time.sleep(1.2)
+
+
+def wifi_cache_loop():
+    # Prima dorme: così l'hotspot è su e, se non c'è ancora un telefono, lo scan non lo spegne dopo.
+    time.sleep(20)
+    while True:
+        try:
+            if not ap_has_stations():
+                networks = _wifi_list("auto")
+                if not networks:
+                    networks = _wifi_list("yes")
+                if networks:
+                    with scan_lock:
+                        SCAN_CACHE["ts"] = time.time()
+                        SCAN_CACHE["networks"] = networks
+        except Exception as error:
+            print("scan:", error)
+        time.sleep(50)
+
+
+def patrol_public():
+    data = {key: value for key, value in PATROL.items() if key != "diagnosis_image"}
+    data["has_image"] = bool(PATROL.get("diagnosis_image"))
+    return data
 
 
 def camera_boot():
@@ -1741,17 +1838,22 @@ def connect_wifi(ssid, password):
         cmd.extend(["password", password])
     result = run(cmd, timeout=45)
     if result.returncode == 0:
-        time.sleep(2)
+        time.sleep(1)
         run(["sudo", "-n", "nmcli", "connection", "modify", ssid, "802-11-wireless.band", "bg"])
         run(["sudo", "-n", "nmcli", "connection", "modify", ssid, "connection.autoconnect", "yes"])
         note_ssid(ssid)
-        realign_hotspot()
         CONNECT_STATE.update(
             busy=False,
             ok=True,
             message="Rete di casa impostata.",
             ssid=ssid,
         )
+        # Il telefono legge l'esito prima che il riavvio dell'AP, se serve, lo stacchi.
+        try:
+            time.sleep(3)
+            realign_hotspot()
+        except Exception as error:
+            print("hotspot:", error)
         return
     error = (result.stderr or result.stdout or "Connessione non riuscita.").strip()
     CONNECT_STATE.update(busy=False, ok=False, message=error, ssid="")
@@ -1762,10 +1864,12 @@ load_alerts()
 load_archive()
 push_config()
 threading.Thread(target=net_loop, daemon=True).start()
+threading.Thread(target=sense_loop, daemon=True).start()
 threading.Thread(target=move_loop, daemon=True).start()
 threading.Thread(target=patrol_loop, daemon=True).start()
 threading.Thread(target=camera_loop, daemon=True).start()
 threading.Thread(target=camera_boot, daemon=True).start()
+threading.Thread(target=wifi_cache_loop, daemon=True).start()
 
 
 @app.route("/api/status", methods=["GET"])
@@ -1779,7 +1883,7 @@ def robot_status():
         "home_ssid": ssid,
         "internet": has_internet(),
         "drive_mode": robot_mode,
-        "patrol": PATROL,
+        "patrol": patrol_public(),
         "tour": tour_public(),
         "connect": CONNECT_STATE,
         "light": light_public(),
@@ -1802,8 +1906,20 @@ def camera_jpg():
     global last_camera_request
     last_camera_request = time.time()
     if not LIVE_JPEG:
-        refresh_live()
-    return Response(LIVE_JPEG or b"", mimetype="image/jpeg")
+        return Response(b"", status=204, mimetype="image/jpeg")
+    return Response(LIVE_JPEG, mimetype="image/jpeg")
+
+
+@app.route("/api/patrol/photo.jpg", methods=["GET"])
+def patrol_photo():
+    raw = PATROL.get("diagnosis_image") or ""
+    if not raw:
+        return Response(b"", status=404)
+    try:
+        blob = base64.b64decode(raw)
+    except Exception:
+        return Response(b"", status=404)
+    return Response(blob, mimetype="image/jpeg")
 
 
 @app.route("/api/mode", methods=["POST"])
@@ -1820,12 +1936,13 @@ def set_mode():
         patrol_paused = False
         if mode != "autonomous":
             TOUR["playing"] = False
-    if patrol_active:
-        set_gait_speed(PATROL_SPEED)
-        reset_head_and_body()
-        PATROL.update(running=True, message="Guida lenta avviata, guardo intorno")
-        add_chat("system", "Cammino piano. Tra un passo e l'altro fermo la testa e guardo sinistra, centro e destra.")
-    else:
+    def finish():
+        if mode == "autonomous":
+            set_gait_speed(PATROL_SPEED)
+            reset_head_and_body()
+            PATROL.update(running=True, message="Guida lenta avviata, guardo intorno")
+            add_chat("system", "Cammino piano. Tra un passo e l'altro fermo la testa e guardo sinistra, centro e destra.")
+            return
         PATROL.update(running=False, message="Pattuglia ferma")
         add_chat("system", "Pattuglia ferma.")
         try:
@@ -1834,7 +1951,9 @@ def set_mode():
             set_gait_speed(MANUAL_SPEED)
         except Exception:
             pass
-    return jsonify({"status": "success", "mode": robot_mode, "patrol": PATROL, "tour": tour_public()})
+
+    threading.Thread(target=finish, daemon=True).start()
+    return jsonify({"status": "success", "mode": robot_mode, "patrol": patrol_public(), "tour": tour_public()})
 
 
 @app.route("/api/move", methods=["POST"])
@@ -1863,7 +1982,7 @@ def move_robot():
 def parse_wifi_scan(stdout):
     seen = {}
     for line in (stdout or "").splitlines():
-        parts = line.split(":")
+        parts = split_nmcli(line)
         if len(parts) < 2:
             continue
         ssid = parts[0].strip()
@@ -1884,34 +2003,43 @@ def parse_wifi_scan(stdout):
     return sorted(seen.values(), key=lambda item: item["signal"], reverse=True)
 
 
+def _wifi_list(rescan):
+    result = run(
+        ["sudo", "-n", "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", rescan],
+        timeout=8,
+    )
+    return parse_wifi_scan(result.stdout)
+
+
+def ap_has_stations():
+    try:
+        result = run(["/usr/sbin/iw", "dev", "ap0", "station", "dump"], timeout=3)
+    except Exception:
+        return False
+    return "Station " in (result.stdout or "")
+
+
 @app.route("/api/wifi/scan", methods=["GET"])
 def wifi_scan():
     now = time.time()
     with scan_lock:
-        if SCAN_CACHE["networks"] and now - SCAN_CACHE["ts"] < 20:
-            return jsonify({"status": "success", "networks": SCAN_CACHE["networks"]})
-    # --rescan auto non forza uno scan: su questa radio lo scan spegne i beacon.
+        cached = list(SCAN_CACHE["networks"])
+        age = now - SCAN_CACHE["ts"]
+    # Con un telefono collegato non si scansiona: sulla stessa radio i beacon si spengono.
+    if cached and (age < 90 or ap_has_stations()):
+        return jsonify({"status": "success", "networks": cached})
     try:
-        result = run(
-            ["sudo", "-n", "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "auto"],
-            timeout=8,
-        )
-        stdout = result.stdout
+        networks = _wifi_list("auto")
     except Exception:
-        stdout = ""
-    networks = parse_wifi_scan(stdout)
-    if not networks:
-        with scan_lock:
-            if SCAN_CACHE["networks"]:
-                return jsonify({"status": "success", "networks": SCAN_CACHE["networks"]})
+        networks = []
+    # Uno scan forzato solo se non c'è nulla in memoria: la prima configurazione deve vedere le reti di casa.
+    if not networks and not cached:
         try:
-            result = run(
-                ["sudo", "-n", "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"],
-                timeout=8,
-            )
-            networks = parse_wifi_scan(result.stdout)
+            networks = _wifi_list("yes")
         except Exception:
             networks = []
+    if not networks and cached:
+        networks = cached
     with scan_lock:
         if networks:
             SCAN_CACHE["ts"] = time.time()

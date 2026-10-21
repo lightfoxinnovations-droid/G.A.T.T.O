@@ -34,6 +34,7 @@ if ! ip -4 addr show ap0 2>/dev/null | grep -q '192.168.4.1/24'; then
 fi
 
 # Riavvia sempre: se dnsmasq è partito prima di ap0 resta muto e il telefono non prende l'IP.
+sudo -n touch "$DIR/dnsmasq.leases"
 sudo -n pkill -f "dnsmasq --conf-file=$DIR/dnsmasq.conf" >/dev/null 2>&1 || true
 sleep 0.3
 sudo -n dnsmasq --conf-file="$DIR/dnsmasq.conf" || true

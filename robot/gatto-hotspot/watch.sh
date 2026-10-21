@@ -46,12 +46,18 @@ rate_ok() {
   now=$(date +%s)
   if [ -f "$stamp" ]; then
     last=$(cat "$stamp" 2>/dev/null || echo 0)
-    if [ $((now - last)) -lt 90 ]; then
+    if [ $((now - last)) -lt 40 ]; then
       return 1
     fi
   fi
   echo "$now" > "$stamp"
   return 0
+}
+
+sta_busy() {
+  local state
+  state=$(nmcli -t -f GENERAL.STATE device show wlan0 2>/dev/null || true)
+  printf '%s\n' "$state" | grep -Eq 'connecting|config|ip-config|need-auth|prepare'
 }
 
 restart_ap() {
@@ -61,6 +67,11 @@ restart_ap() {
 
 sudo -n "$IW" dev wlan0 set power_save off >/dev/null 2>&1 || true
 sudo -n "$IW" dev ap0 set power_save off >/dev/null 2>&1 || true
+
+# Non staccare wlan0 mentre NetworkManager sta ancora entrando nella rete di casa.
+if sta_busy; then
+  exit 0
+fi
 
 ap_ch=$(channel_of ap0 || true)
 sta_ch=$(channel_of wlan0 || true)

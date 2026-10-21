@@ -229,6 +229,11 @@ class _SetupWizardState extends State<SetupWizard> {
       if (scanning) return const Center(child: CircularProgressIndicator(color: gattoGreen));
       return ListView(
         children: [
+          if (networks.isEmpty)
+            const Text(
+              'Nessuna rete vista. Resta collegato a G.A.T.T.O. e aggiorna l’elenco.',
+              style: TextStyle(color: Color(0xFF4B5563), height: 1.45),
+            ),
           for (final network in networks)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),

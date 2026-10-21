@@ -62,6 +62,12 @@ class _HomePageState extends State<HomePage> {
     _poll = Timer.periodic(const Duration(seconds: 4), (_) => _loadPatrol());
   }
 
+  Future<void> _loadDiagnosisPhoto() async {
+    final bytes = await widget.api.diagnosisPhoto();
+    if (!mounted || bytes == null || bytes.isEmpty) return;
+    setState(() => diagnosisImage = base64Encode(bytes));
+  }
+
   Future<void> _loadPatrol() async {
     if (_loading) return;
     _loading = true;
@@ -77,9 +83,13 @@ class _HomePageState extends State<HomePage> {
         } else {
           patrolTitle = 'Fermo';
         }
-        if (status.patrolDiagnosis.isNotEmpty) {
+        if (status.patrolDiagnosis.isNotEmpty && status.patrolDiagnosis != diagnosis) {
           diagnosis = status.patrolDiagnosis;
-          diagnosisImage = status.patrolDiagnosisImage;
+          if (status.patrolDiagnosisImage.isNotEmpty) {
+            diagnosisImage = status.patrolDiagnosisImage;
+          } else {
+            _loadDiagnosisPhoto();
+          }
         }
         tourStops = status.tourStops;
         lightOk = status.lightOk;

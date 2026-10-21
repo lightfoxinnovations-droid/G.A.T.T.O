@@ -60,7 +60,7 @@ class _AppShellState extends State<AppShell> {
       if (status == null) {
         _misses += 1;
         if (_misses >= 2) {
-          await widget.api.bindToWifi();
+          await widget.api.rebind();
           if (await widget.api.locateKnown()) {
             status = await widget.api.status();
           }

@@ -28,6 +28,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String? error;
   String? chosenSsid;
   bool _reading = false;
+  bool looked = false;
   List<WifiNetwork> networks = [];
   final password = TextEditingController();
   Timer? _poll;
@@ -84,6 +85,7 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() {
         networks = list;
         scanning = false;
+        looked = true;
       });
     } catch (_) {
       if (!mounted) return;
@@ -211,6 +213,13 @@ class _SettingsPageState extends State<SettingsPage> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: const Color(0xFFFEE2E2), borderRadius: BorderRadius.circular(12)),
             child: Text(error!, style: const TextStyle(color: Color(0xFFB91C1C))),
+          ),
+        ],
+        if (!scanning && networks.isEmpty && error == null && looked) ...[
+          const SizedBox(height: 12),
+          const Text(
+            'Nessuna rete vista. Resta collegato al robot e riprova.',
+            style: TextStyle(color: Color(0xFF4B5563), height: 1.45),
           ),
         ],
         if (networks.isNotEmpty) ...[

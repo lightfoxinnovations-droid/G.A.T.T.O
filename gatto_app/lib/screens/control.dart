@@ -76,7 +76,7 @@ class _ControlPageState extends State<ControlPage> {
   void _watchLive() {
     _live?.cancel();
     _grabFrame();
-    _live = Timer.periodic(const Duration(milliseconds: 900), (_) => _grabFrame());
+    _live = Timer.periodic(const Duration(milliseconds: 1000), (_) => _grabFrame());
   }
 
   Future<void> _grabFrame() async {
@@ -98,6 +98,12 @@ class _ControlPageState extends State<ControlPage> {
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _syncFromRobot());
   }
 
+  Future<void> _loadDiagnosisPhoto() async {
+    final bytes = await widget.api.diagnosisPhoto();
+    if (!mounted || bytes == null || bytes.isEmpty) return;
+    setState(() => diagnosisImage = base64Encode(bytes));
+  }
+
   Future<void> _syncFromRobot() async {
     if (_syncing || !_visible) return;
     _syncing = true;
@@ -115,9 +121,13 @@ class _ControlPageState extends State<ControlPage> {
         lightText = status.lightOk && status.lightLux != null
             ? '${status.lightLux} lx · ${status.lightLabel}'
             : '';
-        if (!scanning && status.patrolDiagnosis.isNotEmpty) {
+        if (!scanning && status.patrolDiagnosis.isNotEmpty && status.patrolDiagnosis != diagnosis) {
           diagnosis = status.patrolDiagnosis;
-          diagnosisImage = status.patrolDiagnosisImage;
+          if (status.patrolDiagnosisImage.isNotEmpty) {
+            diagnosisImage = status.patrolDiagnosisImage;
+          } else {
+            _loadDiagnosisPhoto();
+          }
         }
       });
       if (autonomous && _visible) {
