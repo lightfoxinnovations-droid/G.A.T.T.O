@@ -2,18 +2,20 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
-/// Curva del pacco 2S di Gatto (~7,4 V), non del 5 V del Raspberry.
+/// Pacco 2S Li-ion. A 7,4 V resta poca carica: 3,7 V per cella non è metà.
 int gattoPackPercent(double volts) {
   const points = <(double, int)>[
-    (6.20, 0),
-    (6.50, 5),
-    (6.80, 12),
-    (7.00, 22),
-    (7.20, 35),
-    (7.40, 50),
-    (7.60, 68),
-    (7.80, 82),
-    (8.00, 92),
+    (6.60, 0),
+    (7.00, 5),
+    (7.20, 10),
+    (7.40, 18),
+    (7.50, 25),
+    (7.60, 35),
+    (7.70, 45),
+    (7.80, 55),
+    (7.90, 65),
+    (8.00, 75),
+    (8.20, 90),
     (8.40, 100),
   ];
   if (volts <= points.first.$1) return 0;

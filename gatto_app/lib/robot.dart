@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:network_info_plus/network_info_plus.dart';
@@ -98,7 +99,10 @@ class RobotStatus {
     final push = (json['push'] as Map?) ?? {};
     final volts = battery['volts'] is num ? (battery['volts'] as num).toDouble() : null;
     final packOk = gattoPackOk(volts) && battery['ok'] == true;
-    final percent = packOk ? gattoPackPercent(volts!) : null;
+    final reported = battery['percent'];
+    final percent = packOk
+        ? (reported is num ? reported.round().clamp(0, 100) : gattoPackPercent(volts!))
+        : null;
     return RobotStatus(
       ok: json['status'] == 'success',
       configured: json['configured'] == true,
@@ -378,6 +382,7 @@ class WifiNetwork {
 class RobotApi {
   RobotApi();
 
+  final http.Client _client = http.Client();
   String? host;
 
   Uri _uri(String path) => Uri.parse('http://$host$path');
@@ -403,16 +408,36 @@ class RobotApi {
     return prefs.getBool('gatto-configured') ?? false;
   }
 
-  Future<bool> _tryHost(String candidate, {Duration timeout = const Duration(seconds: 3)}) async {
+  Future<bool> _probe(String candidate, {Duration timeout = const Duration(milliseconds: 1200)}) async {
     try {
-      final response = await http.get(Uri.parse('http://$candidate/api/status')).timeout(timeout);
-      if (response.statusCode == 200) {
-        host = candidate;
-        await persistHost();
-        return true;
-      }
-    } catch (_) {}
-    return false;
+      final response = await _client.get(Uri.parse('http://$candidate/api/status')).timeout(timeout);
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _firstReachable(Iterable<String> candidates, {Duration timeout = const Duration(milliseconds: 1200)}) async {
+    final unique = <String>[];
+    for (final candidate in candidates) {
+      if (candidate.isEmpty || unique.contains(candidate)) continue;
+      unique.add(candidate);
+    }
+    if (unique.isEmpty) return false;
+    final found = Completer<String?>();
+    var left = unique.length;
+    for (final candidate in unique) {
+      _probe(candidate, timeout: timeout).then((ok) {
+        if (ok && !found.isCompleted) found.complete(candidate);
+        left -= 1;
+        if (left == 0 && !found.isCompleted) found.complete(null);
+      });
+    }
+    final winner = await found.future;
+    if (winner == null) return false;
+    host = winner;
+    await persistHost();
+    return true;
   }
 
   Future<List<String>> _subnetHosts() async {
@@ -425,7 +450,7 @@ class RobotApi {
       final prefix = '${parts[0]}.${parts[1]}.${parts[2]}';
       final self = int.tryParse(parts[3]) ?? -1;
       return [
-        for (var i = 1; i <= 254; i++)
+        for (var i = 1; i <= 40; i++)
           if (i != self) '$prefix.$i:5000',
       ];
     } catch (_) {
@@ -433,31 +458,33 @@ class RobotApi {
     }
   }
 
-  Future<bool> _scanLan() async {
-    final hosts = await _subnetHosts();
-    if (hosts.isEmpty) return false;
-    const batch = 32;
-    for (var i = 0; i < hosts.length; i += batch) {
-      final slice = hosts.sublist(i, i + batch > hosts.length ? hosts.length : i + batch);
-      final found = await Future.wait(
-        slice.map((candidate) => _tryHost(candidate, timeout: const Duration(milliseconds: 500))),
-      );
-      if (found.any((ok) => ok)) return true;
-    }
-    return false;
-  }
-
-  Future<bool> locate() async {
+  Future<bool> locateKnown() async {
     final saved = await lastHost();
-    final candidates = <String>[
+    return _firstReachable([
+      if (host != null) host!,
       hotspotHost,
       if (saved != null && saved.isNotEmpty) saved,
       ...fallbackHosts,
-    ];
-    for (final candidate in candidates.toSet()) {
-      if (await _tryHost(candidate)) return true;
+    ]);
+  }
+
+  Future<bool> probe(String candidate) {
+    return _firstReachable([candidate], timeout: const Duration(milliseconds: 1500));
+  }
+
+  Future<bool> scanLan() async {
+    final hosts = await _subnetHosts();
+    if (hosts.isEmpty) return false;
+    const batch = 10;
+    for (var i = 0; i < hosts.length; i += batch) {
+      final end = i + batch > hosts.length ? hosts.length : i + batch;
+      final found = await _firstReachable(
+        hosts.sublist(i, end),
+        timeout: const Duration(milliseconds: 400),
+      );
+      if (found) return true;
     }
-    return _scanLan();
+    return false;
   }
 
   Future<String?> currentSsid() async {
@@ -492,13 +519,18 @@ class RobotApi {
 
   Future<RobotStatus?> status() async {
     if (host == null) return null;
-    final response = await http.get(_uri('/api/status')).timeout(const Duration(seconds: 6));
-    return RobotStatus.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    try {
+      final response = await _client.get(_uri('/api/status')).timeout(const Duration(seconds: 4));
+      if (response.statusCode != 200) return null;
+      return RobotStatus.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<List<WifiNetwork>> scan() async {
     if (host == null) return [];
-    final response = await http.get(_uri('/api/wifi/scan')).timeout(const Duration(seconds: 12));
+    final response = await _client.get(_uri('/api/wifi/scan')).timeout(const Duration(seconds: 12));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final items = (data['networks'] as List?) ?? [];
     return items
@@ -512,7 +544,7 @@ class RobotApi {
 
   Future<void> connectHome(String ssid, String password) async {
     if (host == null) throw Exception('Robot non raggiunto.');
-    final response = await http
+    final response = await _client
         .post(
           _uri('/api/wifi/connect'),
           headers: {'Content-Type': 'application/json'},
@@ -542,7 +574,7 @@ class RobotApi {
 
   Future<void> forget() async {
     if (host == null) return;
-    await http.post(_uri('/api/wifi/forget')).timeout(const Duration(seconds: 12));
+    await _client.post(_uri('/api/wifi/forget')).timeout(const Duration(seconds: 12));
     host = hotspotHost;
     await persistHost();
     await markConfigured(false);
@@ -550,7 +582,7 @@ class RobotApi {
 
   Future<void> setDriveMode(String mode) async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
-    final response = await http
+    final response = await _client
         .post(
           _uri('/api/mode'),
           headers: {'Content-Type': 'application/json'},
@@ -565,7 +597,7 @@ class RobotApi {
 
   Future<void> move(String direction) async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
-    final response = await http
+    final response = await _client
         .post(
           _uri('/api/move'),
           headers: {'Content-Type': 'application/json'},
@@ -580,7 +612,7 @@ class RobotApi {
 
   Future<List<ChatMessage>> patrolChat({int after = 0}) async {
     if (host == null) return [];
-    final response = await http
+    final response = await _client
         .get(_uri('/api/patrol/chat?after=$after'))
         .timeout(const Duration(seconds: 8));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -593,7 +625,7 @@ class RobotApi {
 
   Future<void> sendPatrolMessage(String message) async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
-    final response = await http
+    final response = await _client
         .post(
           _uri('/api/patrol/say'),
           headers: {'Content-Type': 'application/json'},
@@ -608,9 +640,20 @@ class RobotApi {
 
   String cameraUrl([int tick = 0]) => 'http://$host/api/camera.jpg?t=$tick';
 
+  Future<Uint8List?> cameraFrame() async {
+    if (host == null) return null;
+    try {
+      final response = await _client.get(_uri('/api/camera.jpg')).timeout(const Duration(seconds: 3));
+      if (response.statusCode != 200 || response.bodyBytes.isEmpty) return null;
+      return response.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> tourRecord(bool enabled) async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
-    final response = await http
+    final response = await _client
         .post(
           _uri('/api/tour/record'),
           headers: {'Content-Type': 'application/json'},
@@ -624,7 +667,7 @@ class RobotApi {
 
   Future<void> tourSave(String name) async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
-    final response = await http
+    final response = await _client
         .post(
           _uri('/api/tour/save'),
           headers: {'Content-Type': 'application/json'},
@@ -638,7 +681,7 @@ class RobotApi {
 
   Future<void> tourPlay() async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
-    final response = await http.post(_uri('/api/tour/play')).timeout(const Duration(seconds: 6));
+    final response = await _client.post(_uri('/api/tour/play')).timeout(const Duration(seconds: 6));
     if (response.statusCode >= 400) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       throw Exception(data['message'] ?? 'Giro non avviato.');
@@ -647,12 +690,12 @@ class RobotApi {
 
   Future<void> tourClear() async {
     if (host == null) return;
-    await http.post(_uri('/api/tour/clear')).timeout(const Duration(seconds: 6));
+    await _client.post(_uri('/api/tour/clear')).timeout(const Duration(seconds: 6));
   }
 
   Future<AnalyzeResult> analyze() async {
     if (host == null) throw Exception('Collega prima G.A.T.T.O.');
-    final response = await http.get(_uri('/api/analyze')).timeout(const Duration(seconds: 60));
+    final response = await _client.get(_uri('/api/analyze')).timeout(const Duration(seconds: 60));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     if (data['status'] == 'success') {
       return AnalyzeResult(
@@ -665,7 +708,7 @@ class RobotApi {
 
   Future<List<PlantAlert>> alerts() async {
     if (host == null) return [];
-    final response = await http.get(_uri('/api/alerts')).timeout(const Duration(seconds: 8));
+    final response = await _client.get(_uri('/api/alerts')).timeout(const Duration(seconds: 8));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final items = (data['alerts'] as List?) ?? [];
     return items
@@ -686,7 +729,7 @@ class RobotApi {
 
   Future<(List<Inspection>, List<PlantCompare>)> archivePack() async {
     if (host == null) return (<Inspection>[], <PlantCompare>[]);
-    final response = await http.get(_uri('/api/archive')).timeout(const Duration(seconds: 10));
+    final response = await _client.get(_uri('/api/archive')).timeout(const Duration(seconds: 10));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final items = ((data['inspections'] as List?) ?? [])
         .whereType<Map>()

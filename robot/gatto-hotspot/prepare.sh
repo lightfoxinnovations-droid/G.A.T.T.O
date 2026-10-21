@@ -27,10 +27,13 @@ esac
 sudo -n sed -i "s/^channel=.*/channel=${CHAN}/" "$DIR/hostapd.conf"
 
 sudo -n ip link set ap0 up || true
+sudo -n iw dev wlan0 set power_save off >/dev/null 2>&1 || true
+sudo -n iw dev ap0 set power_save off >/dev/null 2>&1 || true
 if ! ip -4 addr show ap0 2>/dev/null | grep -q '192.168.4.1/24'; then
   sudo -n ip addr add 192.168.4.1/24 dev ap0 2>/dev/null || true
 fi
 
-if ! pgrep -f "dnsmasq --conf-file=$DIR/dnsmasq.conf" >/dev/null; then
-  sudo -n dnsmasq --conf-file="$DIR/dnsmasq.conf" || true
-fi
+# Riavvia sempre: se dnsmasq è partito prima di ap0 resta muto e il telefono non prende l'IP.
+sudo -n pkill -f "dnsmasq --conf-file=$DIR/dnsmasq.conf" >/dev/null 2>&1 || true
+sleep 0.3
+sudo -n dnsmasq --conf-file="$DIR/dnsmasq.conf" || true

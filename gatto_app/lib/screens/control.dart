@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -7,9 +8,11 @@ import '../robot.dart';
 import '../theme.dart';
 
 class ControlPage extends StatefulWidget {
-  const ControlPage({super.key, required this.api});
+  const ControlPage({super.key, required this.api, required this.section, required this.sectionIndex});
 
   final RobotApi api;
+  final ValueNotifier<int> section;
+  final int sectionIndex;
 
   @override
   State<ControlPage> createState() => _ControlPageState();
@@ -30,22 +33,27 @@ class _ControlPageState extends State<ControlPage> {
   bool tourPlaying = false;
   List<String> tourStops = [];
   int lastChatId = 0;
-  int cameraTick = 0;
+  Uint8List? liveFrame;
   final messages = <ChatMessage>[];
   final input = TextEditingController();
   final scroll = ScrollController();
+  bool _syncing = false;
+  bool _grabbing = false;
   Timer? _poll;
   Timer? _live;
+
+  bool get _visible => widget.section.value == widget.sectionIndex;
 
   @override
   void initState() {
     super.initState();
-    _watchLive();
-    _syncFromRobot();
+    widget.section.addListener(_onSection);
+    _onSection();
   }
 
   @override
   void dispose() {
+    widget.section.removeListener(_onSection);
     _poll?.cancel();
     _live?.cancel();
     input.dispose();
@@ -53,12 +61,35 @@ class _ControlPageState extends State<ControlPage> {
     super.dispose();
   }
 
+  void _onSection() {
+    if (!_visible) {
+      _live?.cancel();
+      _live = null;
+      _poll?.cancel();
+      _poll = null;
+      return;
+    }
+    _watchLive();
+    _syncFromRobot();
+  }
+
   void _watchLive() {
     _live?.cancel();
-    _live = Timer.periodic(const Duration(milliseconds: 700), (_) {
-      if (!mounted) return;
-      setState(() => cameraTick += 1);
-    });
+    _grabFrame();
+    _live = Timer.periodic(const Duration(milliseconds: 900), (_) => _grabFrame());
+  }
+
+  Future<void> _grabFrame() async {
+    if (_grabbing || !mounted || !_visible || widget.api.host == null) return;
+    _grabbing = true;
+    try {
+      final frame = await widget.api.cameraFrame();
+      if (!mounted || frame == null) return;
+      setState(() => liveFrame = frame);
+    } catch (_) {
+    } finally {
+      _grabbing = false;
+    }
   }
 
   void _watchPatrol(bool enabled) {
@@ -68,6 +99,8 @@ class _ControlPageState extends State<ControlPage> {
   }
 
   Future<void> _syncFromRobot() async {
+    if (_syncing || !_visible) return;
+    _syncing = true;
     try {
       final status = await widget.api.status();
       if (!mounted || status == null) return;
@@ -87,11 +120,14 @@ class _ControlPageState extends State<ControlPage> {
           diagnosisImage = status.patrolDiagnosisImage;
         }
       });
-      if (autonomous) {
+      if (autonomous && _visible) {
         if (_poll == null) _watchPatrol(true);
         await _loadChat();
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _syncing = false;
+    }
   }
 
   Future<void> _loadChat() async {
@@ -387,18 +423,19 @@ class _ControlPageState extends State<ControlPage> {
     if (widget.api.host == null) {
       return const SizedBox.shrink();
     }
-    final image = Image.network(
-      widget.api.cameraUrl(cameraTick),
-      fit: BoxFit.cover,
-      width: double.infinity,
-      height: height,
-      gaplessPlayback: true,
-      errorBuilder: (context, error, stack) => Container(
-        color: const Color(0xFFDCFCE7),
-        alignment: Alignment.center,
-        child: const Text('Camera in avvio...', style: TextStyle(color: Color(0xFF6B7280))),
-      ),
-    );
+    final image = liveFrame == null
+        ? Container(
+            color: const Color(0xFFDCFCE7),
+            alignment: Alignment.center,
+            child: const Text('Camera in avvio...', style: TextStyle(color: Color(0xFF6B7280))),
+          )
+        : Image.memory(
+            liveFrame!,
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: height,
+            gaplessPlayback: true,
+          );
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: height == null

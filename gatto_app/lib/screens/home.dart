@@ -8,9 +8,11 @@ import '../robot.dart';
 import '../theme.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.api});
+  const HomePage({super.key, required this.api, required this.section, required this.sectionIndex});
 
   final RobotApi api;
+  final ValueNotifier<int> section;
+  final int sectionIndex;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -34,22 +36,35 @@ class _HomePageState extends State<HomePage> {
   String soilValue = '—';
   String soilHint = 'In attesa';
   bool soilOk = false;
+  bool _loading = false;
   Timer? _poll;
+
+  bool get _visible => widget.section.value == widget.sectionIndex;
 
   @override
   void initState() {
     super.initState();
-    _loadPatrol();
-    _poll = Timer.periodic(const Duration(seconds: 3), (_) => _loadPatrol());
+    widget.section.addListener(_onSection);
+    _onSection();
   }
 
   @override
   void dispose() {
+    widget.section.removeListener(_onSection);
     _poll?.cancel();
     super.dispose();
   }
 
+  void _onSection() {
+    _poll?.cancel();
+    if (!_visible) return;
+    _loadPatrol();
+    _poll = Timer.periodic(const Duration(seconds: 4), (_) => _loadPatrol());
+  }
+
   Future<void> _loadPatrol() async {
+    if (_loading) return;
+    _loading = true;
     try {
       final status = await widget.api.status();
       if (!mounted || status == null) return;
@@ -88,14 +103,17 @@ class _HomePageState extends State<HomePage> {
         if (status.batteryOk && status.batteryPercent != null) {
           batteryValue = '${status.batteryPercent}%';
           final volts = status.batteryVolts;
-          final voltText = volts == null ? '' : '${volts.toStringAsFixed(1).replaceAll('.', ',')} V · ';
+          final voltText = volts == null ? '' : '${volts.toStringAsFixed(2).replaceAll('.', ',')} V · ';
           batteryHint = '$voltText${status.batteryLabel}';
         } else {
           batteryValue = '—';
           batteryHint = status.batteryLabel.isEmpty ? 'In attesa' : status.batteryLabel;
         }
       });
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _loading = false;
+    }
   }
 
   Future<void> _togglePatrol() async {
@@ -135,7 +153,6 @@ class _HomePageState extends State<HomePage> {
     final sensors = [
       ('Umidità terreno', soilValue, soilHint, soilOk),
       ('Luce', lightValue, lightHint, lightOk),
-      ('Temperatura', '—', 'In arrivo', false),
     ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),

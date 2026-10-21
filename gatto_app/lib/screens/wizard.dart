@@ -52,7 +52,7 @@ class _SetupWizardState extends State<SetupWizard> {
   Future<void> _lookForRobot() async {
     if (looking) return;
     setState(() => looking = true);
-    final found = await widget.api.locate();
+    final found = await widget.api.probe(hotspotHost);
     if (!mounted) return;
     setState(() => looking = false);
     if (!found) return;

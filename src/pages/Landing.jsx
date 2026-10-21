@@ -170,7 +170,7 @@ function Landing() {
           <p className="features-kicker">Cosa fa oggi</p>
           <h2 id="features-title">Quello che è già pronto</h2>
           <p className="features-lead">
-            Luce, umidità del terreno e batteria di Gatto sono vere. La temperatura arriva quando il sensore è collegato.
+            Luce, umidità del terreno e batteria di Gatto sono misure lette dai sensori.
           </p>
         </div>
         <div className="features-grid">
@@ -211,7 +211,7 @@ function Landing() {
           <p>Android, versione 1.1.13 · circa 51 MB. Non è sul Play Store: si installa dal file.</p>
           <div className="download-card">
             <div className="download-actions">
-              <a className="store-btn android" href="/gatto.apk?v=21" download="gatto.apk">
+              <a className="store-btn android" href="/gatto.apk?v=22" download="gatto.apk">
                 Scarica per Android
               </a>
               <button type="button" className="store-btn ios" disabled>

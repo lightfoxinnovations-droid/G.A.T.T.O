@@ -3,14 +3,15 @@ Description=G.A.T.T.O. hotspot always on
 After=NetworkManager.service
 Wants=NetworkManager.service
 StartLimitIntervalSec=300
-StartLimitBurst=3
+StartLimitBurst=5
 
 [Service]
 Type=simple
 User=gatito
 Restart=always
-RestartSec=20
+RestartSec=5
 ExecStart=/home/gatito/gatto-hotspot/run.sh
+ExecStartPost=/bin/sh -c 'sleep 1; sudo -n iw dev ap0 set power_save off || true; sudo -n iw dev wlan0 set power_save off || true'
 ExecStop=/home/gatito/gatto-hotspot/stop.sh
 
 [Install]

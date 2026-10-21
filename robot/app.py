@@ -128,7 +128,8 @@ LIGHT = {"lux": None, "ok": False, "ts": 0, "ready": False, "addr": 0x23, "bus":
 ADS7830_ADDR = 0x48
 ADS7830_CMD = 0x84
 battery_lock = threading.Lock()
-BATTERY = {"volts": None, "ok": False, "ts": 0}
+adc_lock = threading.Lock()
+BATTERY = {"volts": None, "ok": False, "ts": 0, "good_ts": 0, "samples": []}
 soil_lock = threading.Lock()
 SOIL = {"raw": None, "volts": None, "ok": False, "ts": 0}
 SOIL_CH = 7
@@ -273,54 +274,72 @@ def ads7830_read(bus, channel):
 
 
 def read_pack_volts():
-    try:
-        return float(gatto_adc().power(0))
-    except Exception:
-        if not os.path.exists("/dev/i2c-1"):
-            raise
-        SMBus = _smbus()
-        bus = SMBus(1)
+    with adc_lock:
         try:
-            samples = []
-            for _ in range(9):
-                samples.append(ads7830_read(bus, 0))
-                time.sleep(0.003)
-            samples.sort()
-            return samples[4] / 255.0 * 5.0 * 3
-        finally:
-            bus.close()
+            return float(gatto_adc().power(0))
+        except Exception:
+            if not os.path.exists("/dev/i2c-1"):
+                raise
+            SMBus = _smbus()
+            bus = SMBus(1)
+            try:
+                samples = []
+                for _ in range(9):
+                    samples.append(ads7830_read(bus, 0))
+                    time.sleep(0.003)
+                samples.sort()
+                return samples[4] / 255.0 * 5.0 * 3
+            finally:
+                bus.close()
 
 
 def read_battery():
     with battery_lock:
         now = time.time()
-        if BATTERY["ok"] and now - BATTERY["ts"] < 0.8:
+        if BATTERY["ok"] and now - BATTERY["ts"] < 2.0:
             return dict(BATTERY)
         try:
             volts = read_pack_volts()
             if volts < 5.4 or volts > 9.2:
                 raise RuntimeError(f"pacco cane non valido: {volts:.2f} V")
-            BATTERY.update(volts=round(volts, 2), ok=True, ts=now)
+            samples = list(BATTERY["samples"])
+            samples.append(volts)
+            if len(samples) > 5:
+                samples = samples[-5:]
+            ordered = sorted(samples)
+            smooth = ordered[len(ordered) // 2]
+            BATTERY.update(
+                volts=round(smooth, 2),
+                ok=True,
+                ts=now,
+                good_ts=now,
+                samples=samples,
+            )
             return dict(BATTERY)
         except Exception as error:
+            if BATTERY["ok"] and now - BATTERY["good_ts"] < 20:
+                return dict(BATTERY)
             was_ok = BATTERY["ok"]
-            BATTERY.update(volts=None, ok=False, ts=now)
+            BATTERY.update(volts=None, ok=False, ts=now, samples=[])
             if was_ok:
                 print("batteria cane:", error)
             return dict(BATTERY)
 
 
 def battery_percent(volts):
+    # Pacco 2S Li-ion: a 7,4 V (3,7 V per cella) resta poca carica, non metà.
     points = (
-        (6.20, 0),
-        (6.50, 5),
-        (6.80, 12),
-        (7.00, 22),
-        (7.20, 35),
-        (7.40, 50),
-        (7.60, 68),
-        (7.80, 82),
-        (8.00, 92),
+        (6.60, 0),
+        (7.00, 5),
+        (7.20, 10),
+        (7.40, 18),
+        (7.50, 25),
+        (7.60, 35),
+        (7.70, 45),
+        (7.80, 55),
+        (7.90, 65),
+        (8.00, 75),
+        (8.20, 90),
         (8.40, 100),
     )
     if volts <= points[0][0]:
@@ -359,25 +378,26 @@ def battery_public():
 
 
 def read_soil_raw():
-    try:
-        adc = gatto_adc()
-        samples = [int(adc.readAdc(SOIL_CH)) for _ in range(9)]
-        samples.sort()
-        return samples[4]
-    except Exception:
-        if not os.path.exists("/dev/i2c-1"):
-            raise
-        SMBus = _smbus()
-        bus = SMBus(1)
+    with adc_lock:
         try:
-            samples = []
-            for _ in range(9):
-                samples.append(ads7830_read(bus, SOIL_CH))
-                time.sleep(0.003)
+            adc = gatto_adc()
+            samples = [int(adc.readAdc(SOIL_CH)) for _ in range(9)]
             samples.sort()
             return samples[4]
-        finally:
-            bus.close()
+        except Exception:
+            if not os.path.exists("/dev/i2c-1"):
+                raise
+            SMBus = _smbus()
+            bus = SMBus(1)
+            try:
+                samples = []
+                for _ in range(9):
+                    samples.append(ads7830_read(bus, SOIL_CH))
+                    time.sleep(0.003)
+                samples.sort()
+                return samples[4]
+            finally:
+                bus.close()
 
 
 def read_soil():
@@ -812,8 +832,8 @@ def _init_camera_unlocked():
         picam2 = Picamera2(imx500_device.camera_num)
         config = picam2.create_preview_configuration(
             main={"size": (640, 480)},
-            controls={"FrameRate": 15},
-            buffer_count=6,
+            controls={"FrameRate": 10},
+            buffer_count=3,
         )
         picam2.start(config)
         try:
@@ -843,16 +863,19 @@ def get_camera():
         return picam2
 
 
+def _encode_jpeg(image, max_w, quality):
+    image.thumbnail((max_w, max_w))
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=quality, optimize=False)
+    return buf.getvalue()
+
+
 def make_thumb_bytes(raw, max_w=400, quality=45):
     try:
         from PIL import Image
-        image = Image.open(io.BytesIO(raw))
-        image.thumbnail((max_w, max_w))
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-        buf = io.BytesIO()
-        image.save(buf, format="JPEG", quality=quality)
-        return buf.getvalue()
+        return _encode_jpeg(Image.open(io.BytesIO(raw)), max_w, quality)
     except Exception as error:
         print("miniatura:", error)
         return raw
@@ -868,9 +891,17 @@ def refresh_live():
         with camera_lock:
             if picam2 is None:
                 _init_camera_unlocked()
-            picam2.capture_file(LIVE_PATH)
-        with open(LIVE_PATH, "rb") as handle:
-            LIVE_JPEG = make_thumb_bytes(handle.read(), max_w=480, quality=50)
+            try:
+                image = picam2.capture_image("main")
+            except Exception:
+                picam2.capture_file(LIVE_PATH)
+                with open(LIVE_PATH, "rb") as handle:
+                    raw = handle.read()
+                image = None
+        if image is None:
+            LIVE_JPEG = make_thumb_bytes(raw, max_w=320, quality=36)
+            return
+        LIVE_JPEG = _encode_jpeg(image, 320, 36)
     except Exception as error:
         print("live:", error)
 
@@ -976,8 +1007,17 @@ def save_stop(name):
     return label
 
 
-def home_ssid():
-    result = run(["nmcli", "-t", "-f", "ACTIVE,SSID", "device", "wifi"])
+NET = {"ssid": "", "internet": False, "hold": 0, "ready": False}
+net_lock = threading.Lock()
+SCAN_CACHE = {"ts": 0.0, "networks": []}
+scan_lock = threading.Lock()
+
+
+def read_home_ssid():
+    try:
+        result = run(["nmcli", "-t", "-f", "ACTIVE,SSID", "device", "wifi"], timeout=8)
+    except Exception:
+        return ""
     for line in result.stdout.splitlines():
         parts = line.split(":", 1)
         if len(parts) == 2 and parts[0] == "yes" and parts[1] and parts[1] != HOTSPOT_SSID:
@@ -985,9 +1025,49 @@ def home_ssid():
     return ""
 
 
+def read_internet():
+    try:
+        result = run(["ping", "-c", "1", "-W", "1", "1.1.1.1"], timeout=3)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def note_ssid(ssid):
+    with net_lock:
+        NET["ssid"] = ssid
+        NET["hold"] = time.time() + 20
+        NET["ready"] = True
+
+
+def home_ssid():
+    deadline = time.time() + 2
+    while True:
+        with net_lock:
+            if NET["ready"] or time.time() >= deadline:
+                return NET["ssid"]
+        time.sleep(0.05)
+
+
 def has_internet():
-    result = run(["ping", "-c", "1", "-W", "2", "1.1.1.1"], timeout=6)
-    return result.returncode == 0
+    with net_lock:
+        return NET["internet"]
+
+
+def net_loop():
+    while True:
+        try:
+            ssid = read_home_ssid()
+            with net_lock:
+                NET["ready"] = True
+                if time.time() >= NET["hold"]:
+                    NET["ssid"] = ssid
+            online = read_internet()
+            with net_lock:
+                NET["internet"] = online
+        except Exception as error:
+            print("rete:", error)
+        time.sleep(12)
 
 
 def realign_hotspot():
@@ -1630,7 +1710,7 @@ def camera_loop():
         want = patrol_active or (time.time() - last_camera_request < 10)
         if want:
             refresh_live()
-            time.sleep(0.4)
+            time.sleep(0.85)
         else:
             time.sleep(0.6)
 
@@ -1664,6 +1744,7 @@ def connect_wifi(ssid, password):
         time.sleep(2)
         run(["sudo", "-n", "nmcli", "connection", "modify", ssid, "802-11-wireless.band", "bg"])
         run(["sudo", "-n", "nmcli", "connection", "modify", ssid, "connection.autoconnect", "yes"])
+        note_ssid(ssid)
         realign_hotspot()
         CONNECT_STATE.update(
             busy=False,
@@ -1680,6 +1761,7 @@ load_tour()
 load_alerts()
 load_archive()
 push_config()
+threading.Thread(target=net_loop, daemon=True).start()
 threading.Thread(target=move_loop, daemon=True).start()
 threading.Thread(target=patrol_loop, daemon=True).start()
 threading.Thread(target=camera_loop, daemon=True).start()
@@ -1778,11 +1860,9 @@ def move_robot():
     return jsonify({"status": "success", "direction": direction, "mode": robot_mode})
 
 
-@app.route("/api/wifi/scan", methods=["GET"])
-def wifi_scan():
-    result = run(["sudo", "-n", "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"])
+def parse_wifi_scan(stdout):
     seen = {}
-    for line in result.stdout.splitlines():
+    for line in (stdout or "").splitlines():
         parts = line.split(":")
         if len(parts) < 2:
             continue
@@ -1801,7 +1881,41 @@ def wifi_scan():
                 "signal": signal,
                 "secured": bool(security and security != "--"),
             }
-    networks = sorted(seen.values(), key=lambda item: item["signal"], reverse=True)
+    return sorted(seen.values(), key=lambda item: item["signal"], reverse=True)
+
+
+@app.route("/api/wifi/scan", methods=["GET"])
+def wifi_scan():
+    now = time.time()
+    with scan_lock:
+        if SCAN_CACHE["networks"] and now - SCAN_CACHE["ts"] < 20:
+            return jsonify({"status": "success", "networks": SCAN_CACHE["networks"]})
+    # --rescan auto non forza uno scan: su questa radio lo scan spegne i beacon.
+    try:
+        result = run(
+            ["sudo", "-n", "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "auto"],
+            timeout=8,
+        )
+        stdout = result.stdout
+    except Exception:
+        stdout = ""
+    networks = parse_wifi_scan(stdout)
+    if not networks:
+        with scan_lock:
+            if SCAN_CACHE["networks"]:
+                return jsonify({"status": "success", "networks": SCAN_CACHE["networks"]})
+        try:
+            result = run(
+                ["sudo", "-n", "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"],
+                timeout=8,
+            )
+            networks = parse_wifi_scan(result.stdout)
+        except Exception:
+            networks = []
+    with scan_lock:
+        if networks:
+            SCAN_CACHE["ts"] = time.time()
+            SCAN_CACHE["networks"] = networks
     return jsonify({"status": "success", "networks": networks})
 
 
@@ -1821,6 +1935,9 @@ def wifi_connect():
 @app.route("/api/wifi/forget", methods=["POST"])
 def wifi_forget():
     forget_wifi_networks()
+    note_ssid("")
+    with net_lock:
+        NET["internet"] = False
     CONNECT_STATE.update(busy=False, ok=False, message="", ssid="")
     realign_hotspot()
     return jsonify({"status": "success", "configured": False})
@@ -1949,7 +2066,7 @@ def analyze_plant():
 
 if __name__ == "__main__":
     try:
-        app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+        app.run(host="0.0.0.0", port=5000, threaded=True, debug=False, use_reloader=False)
     finally:
         if picam2 is not None:
             picam2.stop()

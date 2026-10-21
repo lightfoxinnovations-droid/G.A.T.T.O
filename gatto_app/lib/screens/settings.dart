@@ -27,6 +27,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool remoteAlerts = false;
   String? error;
   String? chosenSsid;
+  bool _reading = false;
   List<WifiNetwork> networks = [];
   final password = TextEditingController();
   Timer? _poll;
@@ -53,6 +54,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _loadStatus() async {
+    if (_reading) return;
+    _reading = true;
     try {
       final status = await widget.api.status();
       if (!mounted || status == null) return;
@@ -64,7 +67,10 @@ class _SettingsPageState extends State<SettingsPage> {
         internet = status.internet;
         remoteAlerts = remote;
       });
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _reading = false;
+    }
   }
 
   Future<void> _loadNetworks() async {

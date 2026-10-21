@@ -8,9 +8,11 @@ import '../theme.dart';
 enum _ArchiveFilter { plants, all, alerts }
 
 class HistoryPage extends StatefulWidget {
-  const HistoryPage({super.key, required this.api});
+  const HistoryPage({super.key, required this.api, required this.section, required this.sectionIndex});
 
   final RobotApi api;
+  final ValueNotifier<int> section;
+  final int sectionIndex;
 
   @override
   State<HistoryPage> createState() => _HistoryPageState();
@@ -21,22 +23,35 @@ class _HistoryPageState extends State<HistoryPage> {
   List<PlantCompare> plants = [];
   _ArchiveFilter filter = _ArchiveFilter.plants;
   bool loaded = false;
+  bool _loading = false;
   Timer? _poll;
+
+  bool get _visible => widget.section.value == widget.sectionIndex;
 
   @override
   void initState() {
     super.initState();
-    _load();
-    _poll = Timer.periodic(const Duration(seconds: 6), (_) => _load());
+    widget.section.addListener(_onSection);
+    _onSection();
   }
 
   @override
   void dispose() {
+    widget.section.removeListener(_onSection);
     _poll?.cancel();
     super.dispose();
   }
 
+  void _onSection() {
+    _poll?.cancel();
+    if (!_visible) return;
+    _load();
+    _poll = Timer.periodic(const Duration(seconds: 8), (_) => _load());
+  }
+
   Future<void> _load() async {
+    if (_loading) return;
+    _loading = true;
     try {
       final pack = await widget.api.archivePack();
       if (!mounted) return;
@@ -48,6 +63,8 @@ class _HistoryPageState extends State<HistoryPage> {
     } catch (_) {
       if (!mounted) return;
       setState(() => loaded = true);
+    } finally {
+      _loading = false;
     }
   }
 

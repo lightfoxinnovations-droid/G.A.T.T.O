@@ -51,7 +51,10 @@ class _BootPageState extends State<BootPage> {
   Future<void> _boot() async {
     await api.requestWifiPermission();
     await api.bindToWifi();
-    final found = await api.locate();
+    var found = await api.locateKnown();
+    if (!found && !api.isHotspotSsid(await api.currentSsid())) {
+      found = await api.scanLan();
+    }
     if (!found) {
       final alreadyReady = await api.wasConfigured();
       if (!mounted) return;

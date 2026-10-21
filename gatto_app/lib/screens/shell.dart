@@ -24,18 +24,22 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int tab = 0;
   bool linked = false;
+  bool _pinging = false;
+  int _misses = 0;
   String linkLabel = 'In cerca...';
   int? batteryPercent;
   Timer? _poll;
+  late final ValueNotifier<int> section;
   late final List<Widget> pages;
 
   @override
   void initState() {
     super.initState();
+    section = ValueNotifier(0);
     pages = [
-      HomePage(api: widget.api),
-      ControlPage(api: widget.api),
-      HistoryPage(api: widget.api),
+      HomePage(api: widget.api, section: section, sectionIndex: 0),
+      ControlPage(api: widget.api, section: section, sectionIndex: 1),
+      HistoryPage(api: widget.api, section: section, sectionIndex: 2),
     ];
     _ping();
     _poll = Timer.periodic(const Duration(seconds: 4), (_) => _ping());
@@ -44,14 +48,27 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _poll?.cancel();
+    section.dispose();
     super.dispose();
   }
 
   Future<void> _ping() async {
+    if (_pinging) return;
+    _pinging = true;
     try {
-      final status = await widget.api.status();
+      var status = await widget.api.status();
+      if (status == null) {
+        _misses += 1;
+        if (_misses >= 2) {
+          await widget.api.bindToWifi();
+          if (await widget.api.locateKnown()) {
+            status = await widget.api.status();
+          }
+        }
+      }
       if (!mounted) return;
       if (status == null) {
+        if (_misses < 2 && linked) return;
         setState(() {
           linked = false;
           linkLabel = 'Senza rete';
@@ -60,20 +77,22 @@ class _AppShellState extends State<AppShell> {
         await GattoNotify.pollRemote();
         return;
       }
+      _misses = 0;
+      final current = status;
       setState(() {
         linked = true;
-        batteryPercent = status.batteryOk ? status.batteryPercent : null;
-        if (status.homeSsid.isNotEmpty && status.internet) {
-          linkLabel = 'Collegato · ${status.homeSsid}';
-        } else if (status.internet) {
+        batteryPercent = current.batteryOk ? current.batteryPercent : null;
+        if (current.homeSsid.isNotEmpty && current.internet) {
+          linkLabel = 'Collegato · ${current.homeSsid}';
+        } else if (current.internet) {
           linkLabel = 'Collegato';
         } else {
           linkLabel = 'Collegato, senza internet';
         }
       });
-      await GattoNotify.rememberTopic(status.pushTopic, status.pushServer);
+      await GattoNotify.rememberTopic(current.pushTopic, current.pushServer);
       final seen = await GattoNotify.lastSeenId();
-      if (status.alertsLatestId > seen) {
+      if (current.alertsLatestId > seen) {
         try {
           final items = await widget.api.alerts();
           await GattoNotify.pushNew(items);
@@ -81,12 +100,16 @@ class _AppShellState extends State<AppShell> {
       }
     } catch (_) {
       if (!mounted) return;
+      _misses += 1;
+      if (_misses < 2 && linked) return;
       setState(() {
         linked = false;
         linkLabel = 'Senza rete';
         batteryPercent = null;
       });
       await GattoNotify.pollRemote();
+    } finally {
+      _pinging = false;
     }
   }
 
@@ -163,7 +186,10 @@ class _AppShellState extends State<AppShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: tab,
-        onDestinationSelected: (index) => setState(() => tab = index),
+        onDestinationSelected: (index) {
+          setState(() => tab = index);
+          section.value = index;
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.sports_esports_outlined), selectedIcon: Icon(Icons.sports_esports), label: 'Controllo'),
